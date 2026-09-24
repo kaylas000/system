@@ -1,0 +1,110 @@
+# LiteLLM Proxy config (written by the agent from specs/06_ops/cost_control/MODEL_ROUTER.yaml;
+# fixes: ISSUES O-xx — `general` -> `general_settings`, invalid strategy "cost-optimized",
+# cache under `litellm_settings`, fallbacks in `router_settings`, no plaintext master key,
+# non-existent callback `kernel.cost_control...` removed — budgets are enforced in the kernel
+# by kernel.llm.budget.BudgetManager).
+#
+# Model groups used by the platform (names are the contract; the models behind them are a choice
+# made on 2026-09-24 from LiteLLM's price map — change freely):
+#   router/planner     kernel planner, documenter, gateway cross-vertical architect
+#   router/coder       coder + fixer (bulk of the spend)
+#   router/enricher    knowledge enrichment (summaries)
+#   router/reranker    knowledge LLM reranker
+#   router/classifier  gateway vertical classifier (phase 7)
+#   text-embedding-3-small  knowledge embeddings (settings.knowledge.embedding_model)
+#
+# Validate without keys:  python scripts/check_litellm_config.py deploy/litellm/config.yaml
+# Run:  litellm --config deploy/litellm/config.yaml --port 4000
+#       (kernel: AUTOGEN_LLM__GATEWAY_URL=http://litellm:4000, AUTOGEN_LLM__API_KEY=<virtual or master key>)
+
+model_list:
+  # --- planner: strongest reasoning -------------------------------------------------------
+  - model_name: router/planner
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 16000
+      tpm: 400000
+      rpm: 500
+  - model_name: router/planner_fallback
+    litellm_params:
+      model: openai/gpt-5.4
+      api_key: os.environ/OPENAI_API_KEY
+      max_tokens: 16000
+
+  # --- coder / fixer ----------------------------------------------------------------------
+  - model_name: router/coder
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 16000
+      tpm: 800000
+      rpm: 1000
+  - model_name: router/coder_fallback
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_key: os.environ/OPENAI_API_KEY
+      max_tokens: 16000
+
+  # --- cheap helpers ----------------------------------------------------------------------
+  - model_name: router/enricher
+    litellm_params:
+      model: openai/gpt-5.4-nano
+      api_key: os.environ/OPENAI_API_KEY
+      max_tokens: 1024
+  - model_name: router/reranker
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_key: os.environ/OPENAI_API_KEY
+      max_tokens: 1024
+  - model_name: router/classifier
+    litellm_params:
+      model: openai/gpt-5.4-nano
+      api_key: os.environ/OPENAI_API_KEY
+      max_tokens: 256
+
+  # --- embeddings -------------------------------------------------------------------------
+  - model_name: text-embedding-3-small
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: embedding
+
+  # --- optional local model (uncomment when an Ollama/vLLM service exists) -----------------
+  # - model_name: router/local_coder
+  #   litellm_params:
+  #     model: ollama/qwen2.5-coder:32b
+  #     api_base: http://ollama:11434
+
+router_settings:
+  routing_strategy: simple-shuffle   # one deployment per group; use usage-based-routing with several keys
+  num_retries: 3
+  retry_after: 1
+  allowed_fails: 3
+  cooldown_time: 30
+  timeout: 180
+  fallbacks:
+    - router/planner: [router/planner_fallback]
+    - router/coder: [router/coder_fallback]
+  context_window_fallbacks:
+    - router/coder: [router/planner_fallback]
+  redis_host: os.environ/REDIS_HOST     # shared rpm/tpm counters and cooldowns across proxy replicas
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
+
+litellm_settings:
+  drop_params: true          # e.g. temperature for models that only accept the default
+  request_timeout: 180
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    password: os.environ/REDIS_PASSWORD
+    ttl: 86400
+    supported_call_types: [acompletion, completion, aembedding, embedding]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY   # never commit the key itself
+  # database_url: os.environ/DATABASE_URL     # enables virtual keys + spend tracking in the proxy
