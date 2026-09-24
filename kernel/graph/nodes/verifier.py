@@ -6,6 +6,8 @@ import asyncio
 import time
 from typing import Any
 
+from ...observability.metrics import record_gate_result
+from ...observability.tracing import set_span_attributes, span
 from ...protocols import IVerificationGate
 from ...state import (
     AgentState,
@@ -28,6 +30,17 @@ async def _run_gate(
     gate: IVerificationGate, deps: KernelDeps, sandbox_id: str, workspace: str, state: AgentState
 ) -> VerificationGateResult:
     start = time.perf_counter()
+    vertical = str(state.get("vertical_id") or "unknown")
+    with span(f"gate.{gate.id}", **{"autogen.gate_id": gate.id, "autogen.run_id": str(state.get("run_id", ""))}) as s:
+        result = await _execute_gate(gate, deps, sandbox_id, workspace, state, start)
+        set_span_attributes(s, **{"autogen.gate_status": result.status.value})
+    record_gate_result(gate.id, result.status.value, vertical)
+    return result
+
+
+async def _execute_gate(
+    gate: IVerificationGate, deps: KernelDeps, sandbox_id: str, workspace: str, state: AgentState, start: float
+) -> VerificationGateResult:
     try:
         return await gate.execute(deps.sandbox, sandbox_id, workspace, state)
     except Exception as exc:  # infrastructure failure, not a code failure

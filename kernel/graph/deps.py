@@ -18,6 +18,7 @@ class KernelDeps:
     settings: Settings
     tool_registry: Any | None = None  # kernel.tools.registry.ToolRegistry (optional)
     retriever: Any | None = None  # kernel.knowledge.retrieval.engine.RetrievalEngine (optional RAG)
+    budget: Any | None = None  # kernel.llm.budget.BudgetManager (optional)
 
 
 class MissingDependencyError(RuntimeError):
@@ -50,4 +51,5 @@ def resolve_deps(config: Mapping[str, Any] | None, defaults: Mapping[str, Any]) 
         settings=settings,
         tool_registry=pick("tool_registry"),
         retriever=pick("retriever"),
+        budget=pick("budget", "budget_manager"),
     )

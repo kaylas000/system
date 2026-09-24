@@ -84,7 +84,21 @@ class KnowledgeSection(BaseModel):
 class ObservabilitySection(BaseModel):
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "autogen-kernel"
-    otel_endpoint: str | None = None
+    otel_endpoint: str | None = None  # OTLP/gRPC, e.g. "http://otel-collector:4317"; None -> no trace export
+    log_level: str = "INFO"
+    log_json: bool = True
+
+
+class BudgetSection(BaseModel):
+    """Limits enforced by ``kernel.llm.budget.BudgetManager`` (in addition to ``max_budget_usd`` per request)."""
+
+    max_cost_usd_per_run: float | None = None  # default for requests without max_budget_usd
+    max_cost_usd_per_day: float | None = None  # all runs together
+    max_tokens_per_minute: int | None = None
+    alert_threshold_pct: float = 0.8
+    alert_webhook_url: str | None = None  # Slack-compatible incoming webhook
+    rate_limit_max_wait_s: float = 60.0
+    usage_db_path: str | None = ".data/llm_usage.sqlite"  # None -> in-memory (lost on restart)
 
 
 class HITLSection(BaseModel):
@@ -104,6 +118,7 @@ class Settings(BaseSettings):
     database: DatabaseSection = Field(default_factory=DatabaseSection)
     vector_db: VectorDBSection = Field(default_factory=VectorDBSection)
     knowledge: KnowledgeSection = Field(default_factory=KnowledgeSection)
+    budget: BudgetSection = Field(default_factory=BudgetSection)
     observability: ObservabilitySection = Field(default_factory=ObservabilitySection)
     hitl: HITLSection = Field(default_factory=HITLSection)
     artifacts: ArtifactsSection = Field(default_factory=ArtifactsSection)
