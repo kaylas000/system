@@ -1,0 +1,10 @@
+id: demo
+name: "Demo Vertical"
+version: "0.1.0"
+description: "Test vertical for the skills framework"
+runtime:
+  env_vars: {DEMO: "1"}
+tech_stack: {language: "text"}
+planner: {max_tasks: 10}
+project_structure:
+  src: "sources"

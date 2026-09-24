@@ -45,6 +45,8 @@ async def fixer_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
     workspace = state.get("workspace_path", deps.settings.sandbox.workspace_path)
     failed = [r for r in state.get("current_gate_results", []) if r.status == VerificationGateStatus.FAILED]
     files_to_fix = list((state.get("metadata") or {}).get("files_to_fix", []))
+    if not files_to_fix:  # gate without a parser: show the files this task touched
+        files_to_fix = list(dict.fromkeys(c.path for c in task.file_changes if c.action != "delete"))[-10:]
     report = "\n\n".join(
         f"GATE {r.gate_id} (`{r.command}`, exit {r.exit_code}):\n{r.stdout[-4000:]}\n{r.stderr[-4000:]}" for r in failed
     )

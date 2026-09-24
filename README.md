@@ -14,8 +14,8 @@
 | 0 | Раскладка `specs/`, `ISSUES.md`, CI | ✅ |
 | 1 | Kernel: state, протоколы, граф, HITL, чекпойнты | ✅ |
 | 2 | Infra: песочницы (E2B/Docker), инструменты, LLM-шлюз, бюджет | ✅ (проверено на моках; с реальными E2B и LLM не запускалось — нет ключей. LSP/RAG-инструменты отложены) |
-| 3 | Skills: движок скиллов, реестр, загрузчик вертикалей | ⏳ следующая |
-| 5 | Вертикаль SaaS Web — до первого собранного проекта | — |
+| 3 | Skills: движок скиллов, реестр, загрузчик вертикалей | ✅ |
+| 5 | Вертикаль SaaS Web — до первого собранного проекта | ⏳ в работе |
 | 4 | Knowledge (RAG) | — |
 | 6 | Ops: CI/CD, наблюдаемость, бюджет, HITL API, деплой | — |
 | 7 | Gateway: API, роутер, оркестратор, auth, CLI | — |
@@ -41,6 +41,9 @@ kernel/
   sandbox/            E2BSandbox, DockerSandbox, LocalSandbox (только dev/тесты, без изоляции),
                       SandboxManager (квота, TTL) и фабрика create_sandbox(settings)
   tools/              filesystem, shell (ShellPolicy), git, ToolRegistry, default_tool_registry
+  skills/             skill.yaml + шаблоны + хуки, SkillExecutor, гейты, SkillRegistry,
+                      VerticalLoader, GenericVertical (вертикаль без своего кода)
+  prompts/            PromptCompiler + промпты по умолчанию (PLANNER/CODER/FIXER/DOCUMENTER)
 tests/kernel/         unit + e2e на фейковом LLM; E2B, docker и litellm замоканы
 ```
 

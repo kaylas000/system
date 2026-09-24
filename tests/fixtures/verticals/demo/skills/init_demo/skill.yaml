@@ -1,0 +1,22 @@
+id: init_demo
+name: "Init demo project"
+version: "1.0.0"
+description: "Creates the demo project skeleton."
+category: scaffold
+tags: [scaffold, text]
+provides: [demo_project]
+inputs:
+  type: object
+  required: [project_name]
+  properties:
+    project_name: {type: string, pattern: '^[a-z0-9-]+$'}
+    greeting: {type: string, default: "hello"}
+template_dir: templates
+post_scripts:
+  - "echo {{ project_name }} > .initialized"
+validation:
+  - "test -f .initialized"
+  - "grep -q {{ greeting }} README.txt"
+outputs:
+  project_name: "{{ project_name }}"
+  kind: "demo"

@@ -18,6 +18,7 @@ class KernelSection(BaseModel):
     max_concurrent_runs: int = 20
     default_max_retries: int = 3
     recursion_limit: int = 100  # LangGraph recursion limit (spec: 50, too low for 25 tasks x fix loops)
+    generate_docs: bool = True  # documenter writes README/ARCHITECTURE via LLM if the vertical has a prompt
 
 
 class LLMSection(BaseModel):

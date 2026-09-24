@@ -19,7 +19,7 @@ Deviations from the spec (see ``specs/ISSUES.md``):
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -205,6 +205,14 @@ class SkillDef(BaseModel):
     validation: list[str] = Field(default_factory=list)  # commands to validate success
 
 
+class SkillResult(BaseModel):
+    """Output of ``ISkillExecutor.execute``."""
+
+    file_changes: list[FileChange] = Field(default_factory=list)
+    outputs: dict[str, Any] = Field(default_factory=dict)  # stored in state["skill_outputs"][skill_id]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 @runtime_checkable
 class IVerificationGate(Protocol):
     """Single verification gate (Lint, Test, Typecheck, Build, Custom)."""
@@ -225,12 +233,22 @@ class IVerificationGate(Protocol):
 class ISkillExecutor(Protocol):
     """Executes a deterministic skill (Template + Scripts)."""
 
-    skill_def: SkillDef
+    @property
+    def skill_def(self) -> SkillDef: ...
 
     async def execute(
-        self, sandbox: ISandbox, sandbox_id: str, workspace: str, inputs: dict[str, Any]
-    ) -> list[FileChange]:
-        """Render templates, write files, run post_scripts & validation; return applied changes."""
+        self,
+        sandbox: ISandbox,
+        sandbox_id: str,
+        workspace: str,
+        inputs: dict[str, Any],
+        state: AgentState | None = None,
+    ) -> SkillResult:
+        """Render templates, write files, run post_scripts; return applied changes + outputs.
+
+        Skill ``validation`` commands are NOT run here: the vertical exposes them as a
+        verification gate so they are re-run after every fix (ISSUES SK-06).
+        """
         ...
 
 
@@ -242,7 +260,7 @@ class IVertical(Protocol):
     def manifest(self) -> VerticalManifest: ...
 
     @property
-    def skills(self) -> dict[str, SkillDef]: ...
+    def skills(self) -> Mapping[str, SkillDef]: ...
 
     async def initialize_state(self, request: GenerateRequest) -> dict[str, Any]:
         """Called by `initialize_node`. Returns partial state dict."""

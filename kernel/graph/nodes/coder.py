@@ -37,9 +37,12 @@ async def coder_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
     workspace = state.get("workspace_path", deps.settings.sandbox.workspace_path)
     usage: TokenUsage = state.get("token_usage") or TokenUsage()
 
+    extra: dict[str, Any] = {}
     if task.skill_id and task.skill_id in deps.vertical.skills:
         executor = deps.vertical.get_skill_executor(task.skill_id)
-        changes = await executor.execute(deps.sandbox, sandbox_id, workspace, task.inputs)
+        result = await executor.execute(deps.sandbox, sandbox_id, workspace, task.inputs, state)
+        changes = list(result.file_changes)
+        extra["skill_outputs"] = {**(state.get("skill_outputs") or {}), task.skill_id: dict(result.outputs)}
         how = f"skill {task.skill_id}"
     else:
         messages = [
@@ -61,4 +64,5 @@ async def coder_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
         "status": RunStatus.VERIFYING,
         "updated_at": utcnow(),
         "logs": [log(NODE, f"{task.id}: {how}, {len(changes)} file change(s)")],
+        **extra,
     }
