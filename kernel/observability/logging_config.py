@@ -15,6 +15,7 @@ from typing import Any
 
 run_id_var: ContextVar[str] = ContextVar("autogen_run_id", default="")
 node_var: ContextVar[str] = ContextVar("autogen_node", default="")
+request_id_var: ContextVar[str] = ContextVar("autogen_request_id", default="")
 
 _STD_ATTRS = set(logging.LogRecord("", 0, "", 0, "", None, None).__dict__) | {"message", "asctime"}
 
@@ -23,6 +24,7 @@ class ContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.run_id = run_id_var.get()
         record.node = node_var.get()
+        record.request_id = request_id_var.get()
         return True
 
 
@@ -34,12 +36,12 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "msg": record.getMessage(),
         }
-        for key in ("run_id", "node"):
+        for key in ("run_id", "node", "request_id"):
             value = getattr(record, key, "")
             if value:
                 data[key] = value
         for key, value in record.__dict__.items():
-            if key not in _STD_ATTRS and key not in data and key not in ("run_id", "node"):
+            if key not in _STD_ATTRS and key not in data and key not in ("run_id", "node", "request_id"):
                 data[key] = value if isinstance(value, str | int | float | bool | None) else repr(value)
         if record.exc_info:
             data["exc"] = self.formatException(record.exc_info)

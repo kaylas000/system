@@ -125,6 +125,7 @@ class GatewaySection(BaseModel):
     cors_origins: list[str] = Field(default_factory=list)
     max_budget_usd: float = 100.0  # upper bound for GenerateRequest.max_budget_usd
     allow_private_webhooks: bool = False  # webhook_url to private / loopback addresses (SSRF guard)
+    webhook_secret: SecretStr | None = None  # HMAC-SHA256 signature header X-Autogen-Signature
 
 
 class BudgetSection(BaseModel):

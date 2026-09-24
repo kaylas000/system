@@ -11,7 +11,8 @@ the spec has no content for this module — written by the agent).
 
 Wires everything from ``Settings`` (env ``AUTOGEN_*``): checkpointer (Postgres or in-memory),
 LiteLLM client, sandbox manager, budget manager, verticals from ``kernel.verticals_dir``,
-optional knowledge retriever, logging/tracing, and serves ``kernel.api.create_app``.
+optional knowledge retriever, logging/tracing, and serves the gateway (``kernel.gateway.app``: ``/v1`` API
+with auth and quotas on top of ``kernel.api.create_app``).
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ def build_components(settings: Settings) -> dict[str, Any]:
 def build_app(settings: Settings | None = None) -> Any:
     from fastapi import FastAPI
 
-    from .api import create_app
+    from .gateway.app import create_gateway_app
     from .graph import build_graph
     from .observability import configure_logging, setup_langsmith, setup_tracing
     from .persistence import open_checkpointer
@@ -82,7 +83,7 @@ def build_app(settings: Settings | None = None) -> Any:
             logger.info("kernel service ready (verticals: %s)", sorted(parts["loader"].discover()))
             yield
 
-    return create_app(None, settings, setup=setup)
+    return create_gateway_app(settings, setup=setup, manifests=parts["loader"].discover, llm_client=parts["llm_client"])
 
 
 async def migrate(settings: Settings) -> int:

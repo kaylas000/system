@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict, deque
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
 from langgraph.types import Command
@@ -36,10 +36,11 @@ from ..state import TaskStatus, utcnow
 logger = logging.getLogger(__name__)
 
 VerticalResolver = Callable[[str], IVertical]
+StopHook = Callable[["RunEvent"], Awaitable[None]]
 
 
 class RunEvent(BaseModel):
-    type: str  # node | interrupt | done | error | state
+    type: str  # node | interrupt | done | error | cancelled | state
     run_id: str
     data: dict[str, Any] = Field(default_factory=dict)
     ts: str = Field(default_factory=lambda: utcnow().isoformat())
@@ -136,6 +137,8 @@ class RunManager:
         self._slots = asyncio.Semaphore(max_concurrent or self.settings.kernel.max_concurrent_runs)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._waiting = 0
+        # called once per execution when it stops: done / interrupt / error / cancelled (gateway: quotas, webhooks)
+        self.stop_hooks: list[StopHook] = []
 
     # --- public API -----------------------------------------------------------------------
     async def start(self, request: GenerateRequest, run_id: str | None = None) -> str:
@@ -200,6 +203,15 @@ class RunManager:
             raise RunNotFoundError(run_id)
         return list(values.get("logs") or [])[offset : offset + limit]
 
+    async def cancel(self, run_id: str) -> bool:
+        """Stop the current execution (the checkpoint stays; the run can not be resumed past the cancel)."""
+        task = self._tasks.get(run_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return True
+
     def active_runs(self) -> list[str]:
         return [rid for rid, t in self._tasks.items() if not t.done()]
 
@@ -222,22 +234,31 @@ class RunManager:
             self._waiting -= 1
             m.QUEUE_DEPTH.set(self._waiting)
             m.RUNS_ACTIVE.labels(vertical=vertical_id).inc()
+            final: RunEvent | None = None
             try:
                 async for chunk in self.graph.astream(graph_input, config, stream_mode="updates"):
                     self._publish_chunk(run_id, chunk)
                 interrupt = await self.pending_interrupt(run_id)
                 values = await self.get_state(run_id) or {}
                 if interrupt is not None:
-                    self.bus.publish(RunEvent(type="interrupt", run_id=run_id, data=jsonable(interrupt)))
+                    final = RunEvent(type="interrupt", run_id=run_id, data=jsonable(interrupt))
                 else:
-                    self.bus.publish(RunEvent(type="done", run_id=run_id, data=summarize_state(values)))
+                    final = RunEvent(type="done", run_id=run_id, data=summarize_state(values))
             except asyncio.CancelledError:
+                final = RunEvent(type="cancelled", run_id=run_id)
                 raise
             except Exception as exc:  # graph-level failure (checkpointer, recursion limit, ...)
                 logger.exception("run %s crashed", run_id)
-                self.bus.publish(RunEvent(type="error", run_id=run_id, data={"error": f"{type(exc).__name__}: {exc}"}))
+                final = RunEvent(type="error", run_id=run_id, data={"error": f"{type(exc).__name__}: {exc}"})
             finally:
                 m.RUNS_ACTIVE.labels(vertical=vertical_id).dec()
+                if final is not None:
+                    self.bus.publish(final)
+                    for hook in list(self.stop_hooks):
+                        try:
+                            await hook(final)
+                        except Exception:
+                            logger.exception("stop hook failed for run %s", run_id)
 
     def _publish_chunk(self, run_id: str, chunk: Mapping[str, Any]) -> None:
         for node, update in chunk.items():

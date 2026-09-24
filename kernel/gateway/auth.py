@@ -7,6 +7,8 @@ Authentication, RBAC and quotas (``specs/07_gateway/auth/AUTH_MANAGER.py``, fixe
 * RBAC: viewer (read) < developer (generate, HITL decisions) < admin (all runs of the tenant, keys).
 * Quotas per tenant tier: rpm (every authenticated call), rpd (generations), concurrent (executing runs;
   a slot is taken when a run starts/resumes and released when it stops — done, error or HITL pause).
+* ``X-Tenant-ID`` (optional) must match the tenant of the credentials. WebSocket clients that can not set
+  headers may pass ``?access_token=``.
 * ``gateway.auth_enabled=false`` — local development: every request is an anonymous admin.
 """
 
@@ -19,7 +21,8 @@ from collections import defaultdict
 from typing import Any, Protocol
 
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
+from starlette.requests import HTTPConnection
 
 from kernel.config import Settings, TierLimits
 from kernel.gateway.store import ROLES, GatewayStore, Principal
@@ -190,7 +193,7 @@ class GatewayAuth:
             tiers.get(principal.tier) or tiers.get(self.cfg.default_tier) or TierLimits(rpm=60, rpd=1000, concurrent=5)
         )
 
-    async def authenticate(self, request: Request) -> Principal:
+    async def authenticate(self, request: HTTPConnection) -> Principal:
         if not self.cfg.auth_enabled:
             return Principal(
                 user_id="anonymous", tenant_id="default", roles=["admin"], tier=self.cfg.default_tier,
@@ -200,6 +203,8 @@ class GatewayAuth:
         auth = request.headers.get("authorization", "")
         if not token and auth.lower().startswith("bearer "):
             token = auth[7:].strip()
+        if not token and request.scope.get("type") == "websocket":  # browsers can not set WS headers
+            token = request.query_params.get("access_token")
         if not token:
             raise HTTPException(401, "missing credentials: X-API-Key or Authorization: Bearer",
                                 headers={"WWW-Authenticate": "Bearer"})  # fmt: skip
@@ -250,9 +255,12 @@ class GatewayAuth:
             raise jwt.InvalidTokenError(f"{alg} tokens are not accepted (no public key / JWKS configured)")
         return self.cfg.jwt_public_key
 
-    async def principal(self, request: Request) -> Principal:
+    async def principal(self, request: HTTPConnection) -> Principal:
         """FastAPI dependency body: authenticate and count one request against rpm."""
         principal = await self.authenticate(request)
+        tenant = request.headers.get("x-tenant-id")
+        if tenant and principal.auth_method != "anonymous" and tenant != principal.tenant_id:
+            raise HTTPException(403, "X-Tenant-ID does not match the credentials")
         if principal.auth_method != "anonymous":
             try:
                 await self.limiter.hit(principal.tenant_id, self.limits(principal))

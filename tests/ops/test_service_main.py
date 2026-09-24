@@ -9,7 +9,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from kernel import main as kernel_main
-from kernel.config import BudgetSection, KernelSection, SandboxSection, Settings
+from kernel.config import BudgetSection, GatewaySection, KernelSection, SandboxSection, Settings
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,6 +19,7 @@ def _settings(tmp_path: Path) -> Settings:
         kernel=KernelSection(verticals_dir=str(ROOT / "verticals")),
         sandbox=SandboxSection(provider="local"),
         budget=BudgetSection(usage_db_path=str(tmp_path / "db" / "usage.sqlite"), max_cost_usd_per_day=5.0),
+        gateway=GatewaySection(db_path=str(tmp_path / "db" / "gateway.sqlite")),
     )
 
 
@@ -28,6 +29,9 @@ def test_build_app_serves_health_and_metrics(tmp_path: Path) -> None:
         assert client.get("/health").json() == {"status": "ok", "active_runs": 0}
         assert client.get("/metrics").status_code == 200
         assert client.get("/runs/unknown").status_code == 404
+        assert client.get("/v1/verticals").status_code == 401  # gateway: auth on by default
+        assert app.state.gateway.router.verticals.keys() >= {"saas_web"}
+        assert app.state.run_manager.stop_hooks  # quota release / webhooks attached in the lifespan
         manager = app.state.run_manager
         assert manager.resolve_vertical("").manifest.id == "saas_web"
     assert (tmp_path / "db" / "usage.sqlite").exists()

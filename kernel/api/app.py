@@ -24,6 +24,7 @@ def create_app(
     auth_dependencies: Sequence[params.Depends] | None = None,
     cors_origins: Sequence[str] = (),
     title: str = "AutoGen Kernel API",
+    include_hitl: bool = True,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -58,5 +59,6 @@ def create_app(
     async def metrics() -> Response:
         return Response(render_latest(), media_type=PROMETHEUS_CONTENT_TYPE)
 
-    app.include_router(build_hitl_router(auth_dependencies))
+    if include_hitl:  # the gateway mounts its own tenant-aware copy under /v1
+        app.include_router(build_hitl_router(auth_dependencies))
     return app

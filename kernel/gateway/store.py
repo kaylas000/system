@@ -247,6 +247,11 @@ class GatewayStore:
         row = await self._run(lambda c: c.execute(sql, (run_id,)).fetchone())
         return _run_from_row(row) if row is not None else None
 
+    async def get_run_by_idempotency_key(self, tenant_id: str, key: str) -> RunRecord | None:
+        sql = f"SELECT {_RUN_COLS} FROM runs WHERE tenant_id = ? AND idempotency_key = ?"
+        row = await self._run(lambda c: c.execute(sql, (tenant_id, key)).fetchone())
+        return _run_from_row(row) if row is not None else None
+
     async def list_runs(
         self, tenant_id: str | None, limit: int = 50, offset: int = 0, parent_id: str | None = None
     ) -> list[RunRecord]:

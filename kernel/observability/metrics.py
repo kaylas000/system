@@ -75,6 +75,11 @@ SANDBOX_EXEC = _make(
 )
 BUDGET_EXCEEDED = _make("counter", "autogen_budget_exceeded_total", "Budget limit hits", ("scope",))
 QUEUE_DEPTH = _make("gauge", "autogen_queue_depth", "Runs waiting for a free slot", ())
+GATEWAY_ROUTING = _make("counter", "autogen_gateway_routing_total", "Gateway routing decisions", ("method", "vertical"))
+GATEWAY_REJECTED = _make(
+    "counter", "autogen_gateway_rejected_total", "Gateway requests rejected by auth/quota", ("reason",)
+)
+WEBHOOKS = _make("counter", "autogen_webhooks_total", "Webhook deliveries", ("status",))
 
 
 def render_latest(registry: Any = None) -> bytes:
@@ -101,6 +106,8 @@ def record_gate_result(gate_id: str, status: str, vertical: str) -> None:
 
 __all__ = [
     "BUDGET_EXCEEDED",
+    "GATEWAY_REJECTED",
+    "GATEWAY_ROUTING",
     "GATE_RESULTS",
     "INTERRUPTS",
     "LLM_COST",
@@ -116,6 +123,7 @@ __all__ = [
     "RUNS_TOTAL",
     "RUN_DURATION",
     "SANDBOX_EXEC",
+    "WEBHOOKS",
     "CollectorRegistry",
     "record_gate_result",
     "record_llm_call",
