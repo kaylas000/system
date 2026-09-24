@@ -1,0 +1,118 @@
+# specs/06_ops/deployment/HELM_CHART/values.yaml
+# Helm Chart for Kubernetes Deployment
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/your-org/autogen-kernel
+  tag: "latest"
+  pullPolicy: IfNotPresent
+  pullSecrets: [ghcr-secret]
+
+service:
+  type: ClusterIP
+  port: 8000
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  hosts:
+    - host: autogen.yourdomain.com
+      paths: ["/"]
+  tls:
+    - secretName: autogen-tls
+      hosts: [autogen.yourdomain.com]
+
+resources:
+  limits:
+    cpu: "2000m"
+    memory: "4Gi"
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+
+env:
+  - name: ENVIRONMENT
+    value: "production"
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: autogen-secrets
+        key: database-url
+  - name: QDRANT_URL
+    value: "http://qdrant:6333"
+  - name: KUZU_PATH
+    value: "/data/kuzu"
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector:4317"
+  - name: LITE_LLM_URL
+    value: "http://litellm:4000"
+
+# External Dependencies (Deployed separately via their own Helm charts)
+dependencies:
+  - name: postgresql
+    repository: "https://charts.bitnami.com/bitnami"
+    version: "12.x"
+    condition: postgresql.enabled
+  - name: redis
+    repository: "https://charts.bitnami.com/bitnami"
+    version: "18.x"
+    condition: redis.enabled
+  - name: qdrant
+    repository: "https://qdrant.github.io/qdrant-helm"
+    version: "1.x"
+    condition: qdrant.enabled
+  - name: loki
+    repository: "https://grafana.github.io/helm-charts"
+    version: "6.x"
+    condition: loki.enabled
+
+# Persistent Volume for Kuzu (Embedded Graph DB)
+persistence:
+  kuzu:
+    enabled: true
+    size: 50Gi
+    storageClass: "fast-ssd"
+    accessMode: ReadWriteOnce
+
+# ConfigMap for Verticals (mounted as volume)
+verticalsConfigMap:
+  enabled: true
+  mountPath: /app/verticals
+
+# Pod Disruption Budget
+pdb:
+  enabled: true
+  minAvailable: 50%
+
+# Network Policies
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      ports:
+      - protocol: TCP
+        port: 8000

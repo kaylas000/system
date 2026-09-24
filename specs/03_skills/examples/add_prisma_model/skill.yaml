@@ -1,0 +1,73 @@
+id: add_prisma_model
+name: "Add Prisma Model & Migration"
+version: "1.1.0"
+description: |
+  Adds a new Prisma model to schema.prisma, runs `prisma migrate dev` to create migration,
+  and runs `prisma generate` to update client.
+  Supports relations, indexes, enums.
+category: feature
+tags: [prisma, database, model, migration, backend]
+depends_on: [init_prisma] # Must have Prisma initialized
+provides: [prisma_model]
+
+inputs:
+  type: object
+  required: [model_name, fields]
+  properties:
+    model_name:
+      type: string
+      pattern: '^[A-Z][a-zA-Z0-9]*$'
+      description: "PascalCase model name (e.g. User, BlogPost)"
+    table_name:
+      type: string
+      description: "Optional custom table name (snake_case)"
+    fields:
+      type: array
+      description: "List of field definitions"
+      items:
+        type: object
+        required: [name, type]
+        properties:
+          name:
+            type: string
+            pattern: '^[a-z][a-zA-Z0-9]*$'
+          type:
+            type: string
+            enum: [String, Int, BigInt, Float, Decimal, DateTime, Boolean, Json, Bytes, Enum]
+          is_id: {type: boolean, default: false}
+          is_unique: {type: boolean, default: false}
+          is_optional: {type: boolean, default: true}
+          default: {type: string} # Prisma default expression e.g. "autoincrement()", "now()", "'DRAFT'"
+          relation:
+            type: object
+            properties:
+              model: {type: string}
+              field: {type: string}
+              on_delete: {type: string, enum: [Cascade, Restrict, NoAction, SetNull, SetDefault]}
+    indexes:
+      type: array
+      items:
+        type: object
+        properties:
+          fields: {type: array, items: {type: string}}
+          unique: {type: boolean, default: false}
+    enums:
+      type: array
+      items:
+        type: object
+        properties:
+          name: {type: string}
+          values: {type: array, items: {type: string}}
+
+template_dir: "templates"
+entrypoint: "hooks.py"
+post_scripts:
+  - "pnpm prisma generate"
+  - "pnpm prisma migrate dev --name add_{{ snake_case(model_name) }} --create-only"
+validation:
+  - "pnpm prisma validate"
+  - "test -f prisma/migrations/*/migration.sql"
+outputs:
+  model_name: "{{ model_name }}"
+  table_name: "{{ table_name | default(snake_case(model_name) + 's') }}"
+compatible_verticals: ["saas_web", "py_fastapi_microsvc"] # Works in any vertical with Prisma

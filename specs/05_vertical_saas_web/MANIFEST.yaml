@@ -1,0 +1,92 @@
+# specs/05_vertical_saas_web/MANIFEST.yaml
+id: saas_web
+name: "Modern SaaS Web Application"
+version: "2.1.0"
+description: |
+  Production-grade SaaS starter: Next.js 14 (App Router), React 18, TypeScript, Tailwind, shadcn/ui.
+  Backend: tRPC v11 (Type-safe API), Prisma ORM (PostgreSQL), NextAuth v5 (Auth).
+  Billing: Stripe Subscriptions + Portal. Deploy: Docker, GitHub Actions, Vercel/AWS.
+  Quality: Strict TS, ESLint, Prettier, Husky, Jest/Vitest, Playwright, Semgrep.
+
+# --- Runtime Environment ---
+runtime:
+  docker_image: "ghcr.io/autogen/sandbox-saas-web:v2.1.0" # Built from DOCKERFILE.sandbox.saas_web
+  cpu: 2
+  memory_mb: 4096
+  env_vars:
+    NODE_ENV: "development"
+    NEXT_TELEMETRY_DISABLED: "1"
+  ports: [3000, 5432, 6379] # Next.js, Postgres (if local), Redis (if local)
+
+# --- Tech Stack (Used for RAG Filters & Prompt Context) ---
+tech_stack:
+  language: "typescript"
+  framework: "nextjs@14.2"
+  runtime: "node@20"
+  package_manager: "pnpm@9"
+  ui: "tailwind@3.4,shadcn-ui@latest"
+  orm: "prisma@5"
+  api: "trpc@11"
+  auth: "next-auth@5"
+  db: "postgresql@16"
+  validation: "zod@3"
+  testing: "vitest@1,playwright@1"
+  linting: "eslint@8,typescript-eslint@7,prettier@3"
+  ci: "github-actions"
+
+# --- Skills Registry (Loaded from skills/ dir) ---
+skills_dir: "skills"
+# Skills are auto-discovered. Key skills listed for Planner context:
+key_skills:
+  - init_nextjs_app_router
+  - init_prisma_postgres
+  - add_trpc_router
+  - add_nextauth_credentials
+  - add_stripe_billing
+  - add_shadcn_ui
+  - add_dockerfile_prod
+  - add_github_actions_ci
+  - add_playwright_e2e
+  - add_admin_dashboard
+
+# --- Planner Configuration ---
+planner:
+  system_prompt: "prompts/PLANNER.j2"
+  few_shot_examples: "prompts/examples/planner_saas.jsonl"
+  max_tasks: 25
+  task_granularity: "feature" # One task = one vertical slice (e.g. "User Settings Page")
+  default_constraints:
+    - "Follow Next.js 14 App Router conventions (Server Components by default)"
+    - "Use tRPC for all client-server communication (no raw fetch)"
+    - "Database access ONLY via Prisma in tRPC procedures"
+    - "UI via shadcn/ui + Tailwind. No custom CSS unless necessary."
+    - "Auth via NextAuth (Credentials + OAuth). Protect routes via middleware."
+    - "Strict TypeScript: no 'any', strict null checks."
+    - "All mutations validated by Zod schemas shared via tRPC."
+
+# --- Verification Gates (The Quality Contract) ---
+verification:
+  gates_config: "verification/GATES.yaml"
+  parsers_module: "verification.PARSERS"
+
+# --- Prompt Templates ---
+prompts:
+  planner: "prompts/PLANNER.j2"
+  coder: "prompts/CODER.j2"
+  fixer: "prompts/FIXER.j2"
+  reviewer: "prompts/REVIEWER.j2"
+  documenter: "prompts/DOCUMENTER.j2"
+
+# --- RAG Collections (Filter in Knowledge Base) ---
+rag_collections:
+  - "nextjs_docs_v14"
+  - "trpc_v11_patterns"
+  - "prisma_orm_v5"
+  - "nextauth_v5"
+  - "shadcn_ui_components"
+  - "stripe_integration"
+  - "internal_saas_patterns" # Your private best practices
+  - "security_patterns_owasp"
+
+# --- Compatibility ---
+compatible_kernels: [">=1.0.0"]

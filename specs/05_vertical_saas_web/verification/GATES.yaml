@@ -1,0 +1,105 @@
+# specs/05_vertical_saas_web/verification/GATES.yaml
+# Definition of all Verification Gates for this Vertical.
+
+gates:
+  # --- FAST: Run on every Task ---
+  - id: lint_ts
+    name: "TypeScript ESLint"
+    description: "Lint all TS/TSX files with strict rules."
+    command: "pnpm run lint"
+    runs_on_every_task: true
+    timeout_sec: 60
+    parser: "parse_eslint"
+    severity: "error" # Fail on any error
+
+  - id: typecheck_ts
+    name: "TypeScript Type Check"
+    description: "Run `tsc --noEmit` for full type safety."
+    command: "pnpm run typecheck"
+    runs_on_every_task: true
+    timeout_sec: 120
+    parser: "parse_tsc"
+    severity: "error"
+
+  - id: prisma_validate
+    name: "Prisma Schema Validation"
+    description: "Validate Prisma syntax and format."
+    command: "pnpm prisma validate"
+    runs_on_every_task: false # Only on Prisma tasks
+    tags: ["prisma"]
+    parser: "parse_prisma"
+    severity: "error"
+
+  - id: prisma_generate
+    name: "Prisma Client Generation"
+    description: "Generate Prisma Client after schema changes."
+    command: "pnpm prisma generate"
+    runs_on_every_task: false
+    tags: ["prisma"]
+    severity: "error"
+
+  # --- MEDIUM: Run on Feature Completion / Pre-Merge ---
+  - id: test_unit
+    name: "Unit & Integration Tests (Vitest)"
+    description: "Run unit tests for utils, hooks, procedures."
+    command: "pnpm run test:unit -- --passWithNoTests"
+    runs_on_every_task: false
+    tags: ["test"]
+    timeout_sec: 180
+    parser: "parse_vitest"
+    severity: "error"
+
+  - id: test_contract
+    name: "tRPC Contract Tests"
+    description: "Validate tRPC router types & procedures."
+    command: "pnpm run test:contract"
+    runs_on_every_task: false
+    tags: ["trpc"]
+    severity: "error"
+
+  - id: build_nextjs
+    name: "Next.js Production Build"
+    description: "Full `next build` verification (compiles, generates routes)."
+    command: "pnpm run build"
+    runs_on_every_task: false # Run at end or on docker tasks
+    timeout_sec: 300
+    parser: "parse_nextjs_build"
+    severity: "error"
+
+  - id: docker_build
+    name: "Docker Image Build"
+    description: "Build production Docker image (multi-stage)."
+    command: "docker build -t saas-web:test ."
+    runs_on_every_task: false
+    tags: ["docker"]
+    timeout_sec: 300
+    severity: "error"
+
+  # --- SLOW: Final Verification Only ---
+  - id: test_e2e
+    name: "End-to-End Tests (Playwright)"
+    description: "Critical user journeys: Signup, Login, Checkout, Admin."
+    command: "pnpm run test:e2e -- --project=chromium"
+    runs_on_every_task: false
+    timeout_sec: 600
+    parser: "parse_playwright"
+    severity: "error" # Could be 'warning' for flaky tests
+
+  - id: security_audit
+    name: "Security Audit (Semgrep + npm audit)"
+    description: "Static Analysis (Semgrep OWASP) + Dependency Audit."
+    command: |
+      pnpm audit --prod --audit-level=high && 
+      semgrep scan --config=p/owasp-top-ten --config=p/secrets .
+    runs_on_every_task: false
+    timeout_sec: 180
+    parser: "parse_semgrep"
+    severity: "warning" # Don't block on low-sev findings
+
+  - id: bundle_analyze
+    name: "Bundle Size Analysis"
+    description: "Check for regressions in JS bundle size."
+    command: "ANALYZE=true pnpm run build && next-bundle-analyzer"
+    runs_on_every_task: false
+    tags: ["performance"]
+    severity: "info"

@@ -1,0 +1,38 @@
+# ЧТОБЫ ВКЛЮЧИТЬ: скопировать в .github/workflows/kernel-ci.yml (токен агента не имеет права `workflows`).
+# Minimal kernel CI (phase 1). The full pipeline from specs/06_ops/ci_cd/KERNEL_CI.yml
+# (docker build, integration services, release) is added in phase 6 — see specs/ISSUES.md S-02.
+name: Kernel CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format
+        run: ruff format --check .
+      - name: Mypy (strict)
+        run: mypy kernel
+      - name: Tests
+        run: pytest -q
+      - name: Spec syntax report (non-blocking, see specs/ISSUES.md)
+        run: python scripts/lint_specs.py

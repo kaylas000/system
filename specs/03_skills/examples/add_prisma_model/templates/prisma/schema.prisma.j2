@@ -1,0 +1,40 @@
+// This template is APPENDED to existing schema.prisma
+// Hook `post_render` handles the actual insertion logic (see below)
+
+// generator client {
+//   provider = "prisma-client-js"
+// }
+
+// datasource db {
+//   provider = "postgresql"
+//   url      = env("DATABASE_URL")
+// }
+
+{% if enums %}
+{% for enum in enums %}
+enum {{ enum.name }} {
+{% for value in enum.values %}
+  {{ value }}
+{% endfor %}
+}
+{% endfor %}
+{% endif %}
+
+model {{ model_name }} {
+{% if table_name %}
+  @@map("{{ table_name }}")
+{% endif %}
+
+{% for field in fields %}
+  {{ field.name }} {{ field.type }} {% if field.is_id %}@id{% endif %} {% if field.is_unique %}@unique{% endif %} {% if field.is_optional %}?{% endif %} {% if field.default %}@default({{ field.default }}){% endif %}
+  {% if field.relation %}
+    @relation(name: "{{ model_name }}_{{ field.name }}", references: [id], onDelete: {{ field.relation.on_delete | default("Cascade") }})
+  {% endif %}
+{% endfor %}
+
+{% if indexes %}
+{% for index in indexes %}
+  @@index([{{ index.fields | join(', ') }}]){% if index.unique %} @unique{% endif %}
+{% endfor %}
+{% endif %}
+}

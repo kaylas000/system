@@ -1,0 +1,168 @@
+# specs/06_ops/ci_cd/KERNEL_CI.yml
+# GitHub Actions Workflow for Kernel Platform Repository
+# Path: .github/workflows/kernel-ci.yml
+
+name: Kernel Platform CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'kernel/**'
+      - 'specs/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'Dockerfile.kernel'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/kernel
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  # --- 1. Code Quality & Static Analysis ---
+  lint-and-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 } # For semantic-release
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with: { python-version: ${{ env.PYTHON_VERSION }} }
+
+      - name: Install Dependencies (uv)
+        uses: astral-sh/setup-uv@v3
+        with: { enable-cache: true }
+      - run: uv sync --all-extras --dev
+
+      - name: Ruff Lint
+        run: uv run ruff check kernel/ tests/ specs/
+
+      - name: Ruff Format Check
+        run: uv run ruff format --check kernel/ tests/ specs/
+
+      - name: MyPy Type Check
+        run: uv run mypy kernel/ --strict --show-error-codes
+
+      - name: Check Manifest Schemas (YAML/JSON)
+        run: |
+          find specs/ -name "*.yaml" -exec yamllint -c .yamllint {} \;
+          find specs/ -name "*.json" -exec python -m json.tool {} \; > /dev/null
+
+  # --- 2. Unit & Integration Tests ---
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: autogen_test }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.8.0
+        ports: [6333:6333]
+      redis:
+        image: redis:7-alpine
+        ports: [6379:6379]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: ${{ env.PYTHON_VERSION }} }
+      - uses: astral-sh/setup-uv@v3
+        with: { enable-cache: true }
+      - run: uv sync --all-extras --dev
+
+      - name: Run Pytest (Kernel Core)
+        run: uv run pytest tests/kernel/ -v --cov=kernel --cov-report=xml --junitxml=report.xml
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/autogen_test
+          QDRANT_URL: http://localhost:6333
+          REDIS_URL: redis://localhost:6379
+
+      - name: Run Integration Tests (Verticals)
+        run: uv run pytest tests/verticals/ -v -k "not e2e" --tb=short
+        env:
+          LLM_PROVIDER: "mock" # Use Mock LLM for CI speed
+          SANDBOX_PROVIDER: "docker" # Requires Docker-in-Docker or ACT
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v3
+        with: { files: ./coverage.xml, flags: unittests }
+
+  # --- 3. Contract Tests (Vertical Interfaces) ---
+  contract-tests:
+    name: Vertical Contract Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: ${{ env.PYTHON_VERSION }} }
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --all-extras --dev
+      - name: Verify Vertical Manifests
+        run: uv run python -m scripts.validate_manifests
+      - name: Verify Skill Schemas
+        run: uv run python -m scripts.validate_skills
+
+  # --- 4. Docker Build & Push ---
+  docker:
+    name: Build & Push Kernel Image
+    needs: [lint-and-typecheck, test, contract-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with: { registry: ${{ env.REGISTRY }}, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - name: Extract Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./specs/06_ops/deployment/DOCKERFILE.kernel
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # --- 5. Semantic Release (Automated Versioning) ---
+  release:
+    name: Semantic Release
+    needs: [docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: { contents: write, packages: write, issues: write, pull-requests: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, token: ${{ secrets.GH_TOKEN }} }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - name: Release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # If publishing PyPI package

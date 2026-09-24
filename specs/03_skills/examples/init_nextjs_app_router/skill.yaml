@@ -1,0 +1,61 @@
+id: init_nextjs_app_router
+name: "Initialize Next.js 14 App Router Project"
+version: "1.3.0"
+description: |
+  Creates a production-ready Next.js 14 project with TypeScript, Tailwind CSS, ESLint, Prettier, Husky.
+  Uses App Router, Server Components by default. Configures path aliases (@/).
+  Installs dependencies and runs initial typecheck/lint.
+category: scaffold
+tags: [nextjs, react, typescript, tailwind, scaffold, starter]
+depends_on: [] # Root skill
+provides: [nextjs_app_router, typescript, tailwind, eslint, prettier, husky]
+
+inputs:
+  type: object
+  properties:
+    project_name:
+      type: string
+      pattern: '^[a-z0-9-]+$'
+      description: "NPM package name (kebab-case)"
+      default: "app"
+    package_manager:
+      type: string
+      enum: [pnpm, npm, yarn, bun]
+      default: "pnpm"
+      description: "Package manager to use"
+    typescript_strict:
+      type: boolean
+      default: true
+    tailwind_version:
+      type: string
+      enum: ["3", "4"]
+      default: "3"
+    eslint_config:
+      type: string
+      enum: ["standard", "airbnb", "next-core-web-vitals"]
+      default: "next-core-web-vitals"
+    init_git:
+      type: boolean
+      default: true
+    install_deps:
+      type: boolean
+      default: true
+  required: [project_name]
+
+template_dir: "templates"
+entrypoint: "hooks.py"
+post_scripts:
+  - "{{ package_manager }} install"
+  - "{{ package_manager }} run lint"
+  - "{{ package_manager }} run typecheck"
+validation:
+  - "test -f package.json"
+  - "test -f tsconfig.json"
+  - "test -f tailwind.config.ts"
+  - "{{ package_manager }} run build" # Critical: ensures prod build works
+outputs:
+  nextjs_version: "14.2.0"
+  package_manager: "{{ package_manager }}"
+  router_type: "app_router"
+compatible_verticals: ["saas_web", "marketing_landing"]
+min_kernel_version: "1.0.0"

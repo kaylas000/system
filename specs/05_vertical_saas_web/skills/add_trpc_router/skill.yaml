@@ -1,0 +1,61 @@
+# specs/05_vertical_saas_web/skills/add_trpc_router/skill.yaml
+id: add_trpc_router
+name: "Add tRPC Router & Procedures"
+version: "1.2.0"
+description: |
+  Creates a new tRPC Router file with CRUD procedures (list, getById, create, update, delete)
+  using protectedProcedure, Zod validation, and Prisma. Auto-registers in root router (via hook).
+category: feature
+tags: [trpc, backend, crud, api, zod, prisma]
+depends_on: [init_trpc_setup, init_prisma_postgres]
+provides: [trpc_router]
+
+inputs:
+  type: object
+  required: [router_name, model_name, fields]
+  properties:
+    router_name:
+      type: string
+      pattern: '^[a-z][a-zA-Z0-9]*$'
+      description: "Router key (kebab-case, e.g. 'project', 'user-settings')"
+    model_name:
+      type: string
+      pattern: '^[A-Z][a-zA-Z0-9]*$'
+      description: "Prisma Model Name (PascalCase, e.g. 'Project', 'UserSetting')"
+    description:
+      type: string
+      default: ""
+    fields:
+      type: array
+      description: "Fields for Create/Update Inputs (Zod)"
+      items:
+        type: object
+        required: [name, type]
+        properties:
+          name: {type: string, pattern: '^[a-z][a-zA-Z0-9]*$'}
+          type: {type: string, enum: [string, number, boolean, date, json, enum]}
+          optional: {type: boolean, default: true}
+          enum_values: {type: array, items: {type: string}}
+          validation: {type: string} # e.g. "email", "url", "min(3)", "max(100)"
+    permissions:
+      type: object
+      default: {}
+      properties:
+        list: {type: string, enum: [public, protected, admin], default: "protected"}
+        get: {type: string, enum: [public, protected, admin], default: "protected"}
+        create: {type: string, enum: [protected, admin], default: "protected"}
+        update: {type: string, enum: [protected, admin], default: "protected"}
+        delete: {type: string, enum: [protected, admin], default: "admin"}
+
+template_dir: "templates"
+entrypoint: "hooks.py"
+post_scripts:
+  - "pnpm run typecheck" # Verify types immediately
+validation:
+  - "test -f src/server/api/routers/{{ router_name }}.ts"
+  - "pnpm run typecheck"
+outputs:
+  router_name: "{{ router_name }}"
+  model_name: "{{ model_name }}"
+  procedures: ["list", "getById", "create", "update", "delete"]
+compatible_verticals: ["saas_web"]

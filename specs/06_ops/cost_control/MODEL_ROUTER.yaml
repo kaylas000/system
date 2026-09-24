@@ -1,0 +1,103 @@
+# specs/06_ops/cost_control/MODEL_ROUTER.yaml
+# LiteLLM Router Configuration (config.yaml for LiteLLM Proxy)
+# Deploy LiteLLM Proxy as a sidecar or separate service.
+
+general:
+  master_key: "sk-litellm-master-key" # Secure in production
+  log_level: "INFO"
+  redis_url: "redis://redis:6379/0" # For caching & rate limiting
+
+router_settings:
+  strategy: "cost-optimized" # or "latency-optimized", "fallback"
+  enable_retries: true
+  num_retries: 3
+  retry_after: 1
+  cooldown_time: 30
+
+model_list:
+  # --- PLANNER / ARCHITECT (Smart, Expensive) ---
+  - model_name: "router/planner"
+    litellm_params:
+      model: "anthropic/claude-3-5-sonnet-20241022" # Or gpt-4o
+      api_key: "${ANTHROPIC_API_KEY}"
+      max_tokens: 8192
+      temperature: 0.1
+    model_info:
+      mode: "chat"
+      cost_per_1k_input: 0.003
+      cost_per_1k_output: 0.015
+      max_tokens: 200000
+    tpm: 100000
+    rpm: 500
+
+  - model_name: "router/planner_fallback"
+    litellm_params:
+      model: "openai/gpt-4o-2024-08-06"
+      api_key: "${OPENAI_API_KEY}"
+    model_info:
+      cost_per_1k_input: 0.0025
+      cost_per_1k_output: 0.01
+
+  # --- CODER / FIXER (Fast, Cheap, Good at Code) ---
+  - model_name: "router/coder"
+    litellm_params:
+      model: "anthropic/claude-3-5-haiku-20241022"
+      api_key: "${ANTHROPIC_API_KEY}"
+      max_tokens: 4096
+      temperature: 0.0
+    model_info:
+      cost_per_1k_input: 0.00025
+      cost_per_1k_output: 0.00125
+      max_tokens: 200000
+    tpm: 200000
+    rpm: 1000
+
+  - model_name: "router/coder_fallback"
+    litellm_params:
+      model: "openai/gpt-4o-mini-2024-07-18"
+      api_key: "${OPENAI_API_KEY}"
+    model_info:
+      cost_per_1k_input: 0.00015
+      cost_per_1k_output: 0.0006
+
+  # --- ENRICHMENT / CLASSIFIER (Fastest, Cheapest) ---
+  - model_name: "router/enricher"
+    litellm_params:
+      model: "openai/gpt-4o-mini"
+      api_key: "${OPENAI_API_KEY}"
+      max_tokens: 1024
+    model_info:
+      cost_per_1k_input: 0.00015
+      cost_per_1k_output: 0.0006
+
+  - model_name: "router/classifier"
+    litellm_params:
+      model: "openai/gpt-4o-mini"
+      api_key: "${OPENAI_API_KEY}"
+      max_tokens: 50
+    model_info:
+      cost_per_1k_input: 0.00015
+      cost_per_1k_output: 0.0006
+
+  # --- LOCAL FALLBACK (Ollama / vLLM) ---
+  - model_name: "router/local_coder"
+    litellm_params:
+      model: "ollama/codellama:34b-instruct"
+      api_base: "http://ollama:11434"
+    model_info:
+      cost_per_1k_input: 0
+      cost_per_1k_output: 0
+      max_tokens: 16000
+
+# --- Caching Config ---
+cache:
+  type: "redis"
+  host: "redis"
+  port: 6379
+  ttl: 86400 # 24h
+  enabled: true
+  cache_control: true # Respect Cache-Control headers
+
+# --- Callbacks (for Budget Manager) ---
+callbacks:
+  - "kernel.cost_control.budget_callback.BudgetCallbackHandler"
