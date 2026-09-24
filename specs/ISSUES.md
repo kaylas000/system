@@ -101,3 +101,31 @@
 | ID | Проблема | Статус |
 |---|---|---|
 | X-01 | Версии моделей и библиотек в ТЗ, вероятно, устарели (в окружении — langgraph 1.2, langchain-core 1.x). Реализация ориентируется на актуальные версии | decision |
+
+## 10. Дополнения (`specs/addenda/`)
+
+### 10.1 `01_phase1_patch_v1.md` — заменён версией v2
+
+Дефекты v1 (подтверждены: пакеты проверены в реестре npm, остальное сверено с ТЗ): несуществующие `@radix-ui/react-button|input|textarea`, `@trivy/plugin`; `@hookform/resolvers/zod` как имя пакета; `tailwindcss-animate` не в зависимостях; `layout.tsx`/`providers.tsx` импортируют файлы будущих скиллов и неописанный псевдоним `~`; нет `output: 'standalone'` и папки `public`; `Role` в `seed.ts`; `from typing:` в хуках; несуществующие зависимости `init_trpc_setup`, `add_tailwind_content_paths`; deprecated `shadcn-ui`; категория `infra` вне схемы; `docker build` внутри песочницы; ложное утверждение, что `add_trpc_router/hooks.py` генерирует базу tRPC. Большая часть исправлена в v2.
+
+### 10.2 `02_phase1_patch_v2.md` — остающиеся дефекты
+
+| ID | Где | Проблема | Статус |
+|---|---|---|---|
+| A-01 | Q, R, S | Утверждается, что `FIXER.j2`, `DOCUMENTER.j2`, `COST_TRACKER.py`, `DEFAULT_VERTICAL.py`, `prompts/compiler.py` были выданы «в ответе №7». В части 7 ТЗ их нет (только имена в деревьях/манифесте), в присланных текстах тоже. **Файлы по-прежнему отсутствуют** | open |
+| A-02 | M `server.ts.j2` | Синтаксическая ошибка: `create({ … }),` → `)` без закрывающей `}` | open |
+| A-03 | M `server.ts.j2` | `getServerSession` не экспортируется из `next-auth` v5 (проверено в `next-auth@5.0.0-beta.32`); в v5 используется `auth()` | open |
+| A-04 | M `server.ts.j2` / I | Импорт `authOptions` из `@/lib/auth`: такого экспорта в `auth.ts.j2` нет, а сам файл создаёт `add_nextauth_credentials`, который **зависит** от `init_trpc_setup` → цикл, `typecheck` в `init_trpc_setup` упадёт | open |
+| A-05 | M `providers.tsx.j2` | `TRPCReactProvider` не экспортируется из `react.tsx.j2` (там `trpc` и `createTRPCClient`); нужно `trpc.Provider` | open |
+| A-06 | M | Нет обработчика `src/app/api/trpc/[trpc]/route.ts` — клиент стучится в `/api/trpc`, получит 404 | open |
+| A-07 | M `root.ts.j2` vs ТЗ `VERTICAL_IMPL.py` | `_update_root_router` в ТЗ ищет `mergeRouters({`, а `root.ts` использует `createTRPCRouter({})` → роутеры не регистрируются. В v2 утверждается, что метод ищет `createTRPCRouter({` — это не так, нужно исправить в реализации | open |
+| A-08 | J `auth.ts.j2` / A | `@auth/prisma-adapter` не в `package.json`; `Google` используется без импорта | open |
+| A-09 | J `middleware.ts.j2` | Middleware импортирует `auth` с Prisma-адаптером → Prisma в edge runtime; для NextAuth v5 нужен отдельный edge-совместимый `auth.config.ts` | open |
+| A-10 | J `login/page.tsx.j2` | `{% if error %}…{{ error }}` — Jinja выполняется при генерации, а `error` — состояние React: ошибка входа не будет показана. Импортирует компоненты shadcn, но скилл не зависит от `add_shadcn_ui` | open |
+| A-11 | K `components.json.j2` | Невалидный JSON: `"prefix: ""` | open |
+| A-12 | K, L, M `hooks.py` | Снова `from typing:` — `SyntaxError` | open |
+| A-13 | K | `bunx` — bun в образе не установлен (сработает только запасной `npx`); `shadcn@latest` не зафиксирован — поведение CLI меняется между версиями | open |
+| A-14 | N `GATES.yaml` | Gate `docker_build` в `GATES.yaml` ТЗ уже есть — дубль id; парсера `parse_docker_build` в `PARSERS.py` нет; поле `runs_in` никем не читается | open |
+| A-15 | O `DOCKERFILE.sandbox.base` | `uv pip install --system` на Ubuntu 24.04 падает (externally managed — проверено на Debian с тем же маркером); после `fnm install` `npm` не попадает в PATH того же `RUN`; node/cargo остаются в `/root` (недоступно пользователю `autogen`), `rust-analyzer` — симлинк в `/root`; `tsc` в HEALTHCHECK глобально не установлен | open |
+| A-16 | A `package.json.j2` vs ТЗ | Расходится с `03_skills/examples/init_nextjs_app_router/templates/package.json.j2` (vitest vs jest, версии); `packageManager` зашит как pnpm, хотя вход скилла допускает npm/yarn/bun | decision: берётся v2, `packageManager` из входа |
+| A-17 | O vs ТЗ `SANDBOX_API.md` | Два разных `DOCKERFILE.sandbox.*` (в ТЗ и в дополнении), разные теги образа (`my-registry/…:latest`, `ghcr.io/autogen/sandbox-base:v1`, в `MANIFEST.yaml` — `sandbox-saas-web:v2.1.0`) | decision в фазе 2 |

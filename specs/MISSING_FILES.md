@@ -12,6 +12,8 @@
 
 Колонка «Что о файле известно из ТЗ» — это всё, что о нём сказано в ТЗ. Остальное придётся додумывать.
 
+> **Обновление:** часть позиций покрыта дополнениями в `specs/addenda/` (с дефектами, см. `ISSUES.md` §10): №4, №5 (шаблоны init_nextjs), №10 (init_prisma_postgres), №11 (add_nextauth_credentials), №12 (add_shadcn_ui), №13 (add_dockerfile_prod), №18 (init_trpc_setup — создан как скилл). **Не покрыты:** №1 `COST_TRACKER.py`, №3 `DEFAULT_VERTICAL.py`, №19 `FIXER.j2`, №20 `DOCUMENTER.j2`, №22 `compiler.py` и все позиции B.
+
 ## Часть 2 — Infra
 
 | # | Файл | Пр. | Что о файле известно из ТЗ | Решение |
