@@ -100,12 +100,14 @@ def build_graph(
     sandbox: ISandbox | None = None,
     settings: Settings | None = None,
     tool_registry: Any | None = None,
+    retriever: Any | None = None,
     checkpointer: Any | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build and compile the kernel graph.
 
     Dependencies given here are defaults; each can be overridden per run via
-    ``config["configurable"]`` (``vertical``, ``llm_client``, ``sandbox``, ``settings``, ``tool_registry``).
+    ``config["configurable"]`` (``vertical``, ``llm_client``, ``sandbox``, ``settings``, ``tool_registry``,
+    ``retriever`` — optional knowledge-base ``RetrievalEngine`` that fills ``metadata.rag_context``).
     """
     defaults: dict[str, Any] = {
         "vertical": vertical,
@@ -113,6 +115,7 @@ def build_graph(
         "sandbox": sandbox,
         "settings": settings,
         "tool_registry": tool_registry,
+        "retriever": retriever,
     }
     g: StateGraph[Any, Any, Any, Any] = StateGraph(AgentState)
     for name, fn in NODES.items():

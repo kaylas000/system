@@ -84,7 +84,17 @@
 
 | ID | Где | Проблема | Статус |
 |---|---|---|---|
-| KN-01 | часть 4 | Нет `EMBEDDING.py`, `HYBRID_SEARCH.py`, `GRAPH_TRAVERSAL.py` | open |
+| KN-01 | часть 4 | Нет `EMBEDDING.py`, `HYBRID_SEARCH.py`, `GRAPH_TRAVERSAL.py` | fixed (написано агентом): `kernel/knowledge/ingestion/embedding.py`, гибридный поиск — `storage/qdrant_store.py::hybrid_search`, обход графа — `storage/graph_store.py` |
+| KN-02 | `ingestion/PARSERS.py` | `tree_sitter_languages` несовместим с `tree-sitter>=0.22`; queries-API меняется между версиями | fixed: грамматики из пакетов `tree-sitter-typescript/-python/-go`, обход дерева без queries — `kernel/knowledge/ingestion/parsers.py` (TS/TSX/JS, Python, Go) |
+| KN-03 | `storage/KUZU_CLIENT.py`, README | Kuzu заархивирован 2025-10-10 (read-only, релизов больше не будет); `MERGE` со всеми свойствами; у `Symbol` нет `file_path`, а запросы по нему фильтруют | fixed: граф на SQLite (stdlib) с той же схемой меток/связей и рекурсивными CTE — `storage/graph_store.py`, протокол `IGraphStore` для Neo4j/FalkorDB; граф репо пересобирается атомарно (`replace_repo`) |
+| KN-04 | `CHUNKING_STRATEGIES.py` | `RetrievalChunk.graph_edges = []` — мутабельный default у dataclass (`ValueError` при импорте), `Tuple` не импортирован; используется `SymbolType.CALL`, которого нет | fixed: pydantic-модели `kernel/knowledge/models.py` |
+| KN-05 | `CHUNKING_STRATEGIES.py` | Импорты/вызовы не резолвятся (`import:<name>`, `call:<name>` — заглушки) → в графе нет рёбер между реальными символами | fixed: резолв относительных, `@/`/tsconfig `paths`, Python-модулей, Go-пакетов; вызовы — тот же файл → импортированные имена → уникальный экспорт — `ingestion/chunking.py` |
+| KN-06 | `QDRANT_CLIENT.py` | ID точек — строки (`repo#file#symbol#line`); Qdrant принимает только UUID/uint; `client.search` устарел; sparse/BM25 не настроен; индекс `text` на `file_path` не даёт префиксного фильтра | fixed: `uuid5(chunk_id)` + `payload.chunk_id`; `query_points` с prefetch dense+sparse и RRF; sparse `bm25` с `Modifier.IDF`; префиксы путей — keyword-поле `path_prefixes` |
+| KN-07 | `ENRICHMENT.py` | Один LLM-вызов на чанк; при ошибке — фиктивные `intent="Unknown"` и т.п. (засоряют фильтры); `settings.llm.enrichment_model` не существует | fixed: несколько чанков на вызов (`items_per_call`), при ошибке `enriched=False`, модель — `knowledge.enrichment_model` |
+| KN-08 | `INGESTION_PIPELINE.py` | Мутабельные defaults у dataclass; глобальные клиенты внутри конструктора; `_embed` возвращает нули; нет инкрементальности | fixed: зависимости инжектятся; эмбеддинги — `litellm.aembedding` или офлайн `HashingEmbedder`; векторы обновляются только для изменённых файлов (hash), удалённые файлы вычищаются |
+| KN-09 | `RETRIEVAL_STRATEGIES.py` | Фильтр `language == tech_stack.language` (`"typescript@5"`) никогда не совпадает с payload (`"typescript"`); `query_callers` вызывается без `await`; `search_by_symbol` не определён | fixed: область поиска — `manifest.rag_collections` ∩ проиндексированные репо (иначе вся база), язык — буст в реранкере; стратегии coding/planning/fixing — `retrieval/engine.py` |
+| KN-10 | `cli/INGEST_CLI.py` | `reindex` и `delete` — «Not implemented in spec»; источников для `reindex` в манифесте нет | fixed: `autogen-knowledge ingest/reindex/search/callers/stats/delete`; `reindex` читает необязательный `knowledge_sources` манифеста |
+| KN-11 | README §2 | `Dockerfile.knowledge` | open (фаза 6, Ops): в среде разработки нет docker |
 
 ## 6. Вертикаль SaaS Web (часть 5)
 

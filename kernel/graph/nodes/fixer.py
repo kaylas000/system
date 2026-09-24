@@ -18,6 +18,7 @@ from ...state import (
 )
 from ..deps import KernelDeps
 from ._common import add_usage, content_hashes, log, sanitize_changes
+from ._rag import with_rag_context
 from .coder import CodeChanges
 
 NODE = "fixer"
@@ -55,8 +56,9 @@ async def fixer_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
         f"FILES:\n{await _read_files(deps, sandbox_id, workspace, files_to_fix)}\n\n"
         "Return CodeChanges JSON with the complete fixed content of every file you change."
     )
+    view, rag_ids = await with_rag_context(state, deps, "fixing", report, files=files_to_fix)
     messages = [
-        LLMMessage(role="system", content=deps.vertical.get_fixer_prompt(state, task)),
+        LLMMessage(role="system", content=deps.vertical.get_fixer_prompt(view, task)),
         LLMMessage(role="user", content=user),
     ]
     usage: TokenUsage = state.get("token_usage") or TokenUsage()
@@ -84,5 +86,11 @@ async def fixer_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
         "token_usage": usage,
         "status": RunStatus.VERIFYING,
         "updated_at": utcnow(),
-        "logs": [log(NODE, f"{task.id}: attempt {retried.retry_count}, {len(changes)} patch(es)")],
+        "logs": [
+            log(
+                NODE,
+                f"{task.id}: attempt {retried.retry_count}, {len(changes)} patch(es)"
+                + (f", rag {len(rag_ids)} chunk(s)" if rag_ids else ""),
+            )
+        ],
     }

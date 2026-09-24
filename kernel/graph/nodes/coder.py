@@ -19,6 +19,7 @@ from ._common import (
     read_context_files,
     sanitize_changes,
 )
+from ._rag import with_rag_context
 
 NODE = "coder"
 
@@ -62,6 +63,9 @@ async def coder_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
             deps.sandbox, sandbox_id, workspace, [p for p in dict.fromkeys(wanted) if p in present]
         )
         view = cast(AgentState, {**state, "file_tree": tree, "open_files": open_files})
+        view, rag_ids = await with_rag_context(
+            view, deps, "coding", f"{task.name}\n{task.description}", files=[f["path"] for f in open_files]
+        )
         messages = [
             LLMMessage(role="system", content=deps.vertical.get_coder_prompt(view, task)),
             LLMMessage(role="user", content=task_user_message(task)),
@@ -71,7 +75,7 @@ async def coder_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
         output = resp.parsed if isinstance(resp.parsed, CodeChanges) else CodeChanges.model_validate_json(resp.content)
         changes = sanitize_changes(output.file_changes)
         await deps.sandbox.write_files(sandbox_id, changes, workspace)
-        how = "freeform coding"
+        how = "freeform coding" + (f", rag {len(rag_ids)} chunk(s)" if rag_ids else "")
 
     updated = task.model_copy(update={"file_changes": [*task.file_changes, *changes]})
     return {

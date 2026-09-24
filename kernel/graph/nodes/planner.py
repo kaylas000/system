@@ -10,6 +10,7 @@ from ...protocols import LLMMessage
 from ...state import AgentState, InterruptType, RunStatus, Task, TokenUsage, utcnow, validate_dag
 from ..deps import KernelDeps
 from ._common import add_usage, log
+from ._rag import with_rag_context
 
 NODE = "planner"
 MAX_ATTEMPTS = 2  # spec: 1 retry on parse failure
@@ -59,8 +60,9 @@ def tasks_from_plan(plan: PlannerOutput, known_skills: set[str]) -> list[Task]:
 
 
 async def planner_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
+    view, rag_ids = await with_rag_context(state, deps, "planning", str(state.get("user_prompt", "")))
     messages = [
-        LLMMessage(role="system", content=deps.vertical.get_planner_prompt(state)),
+        LLMMessage(role="system", content=deps.vertical.get_planner_prompt(view)),
         LLMMessage(role="user", content=build_user_message(state)),
     ]
     usage: TokenUsage = state.get("token_usage") or TokenUsage()
@@ -129,5 +131,5 @@ async def planner_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
         "error": None,
         "interrupt_type": None,
         "status": RunStatus.CODING,
-        "logs": [log(NODE, f"plan with {len(tasks)} tasks")],
+        "logs": [log(NODE, f"plan with {len(tasks)} tasks" + (f", rag {len(rag_ids)} chunk(s)" if rag_ids else ""))],
     }

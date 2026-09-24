@@ -17,6 +17,7 @@ class KernelDeps:
     sandbox: ISandbox
     settings: Settings
     tool_registry: Any | None = None  # kernel.tools.registry.ToolRegistry (optional)
+    retriever: Any | None = None  # kernel.knowledge.retrieval.engine.RetrievalEngine (optional RAG)
 
 
 class MissingDependencyError(RuntimeError):
@@ -48,4 +49,5 @@ def resolve_deps(config: Mapping[str, Any] | None, defaults: Mapping[str, Any]) 
         sandbox=sandbox,
         settings=settings,
         tool_registry=pick("tool_registry"),
+        retriever=pick("retriever"),
     )

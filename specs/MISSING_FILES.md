@@ -36,9 +36,9 @@
 
 | # | Файл | Пр. | Что о файле известно из ТЗ | Решение |
 |---|---|---|---|---|
-| 7 | `04_knowledge/ingestion/EMBEDDING.py` | B | Только имя в дереве (стр. 3935) | ☐ Я ☐ Агент |
-| 8 | `04_knowledge/retrieval/HYBRID_SEARCH.py` | B | Только имя в дереве (стр. 3943) | ☐ Я ☐ Агент |
-| 9 | `04_knowledge/retrieval/GRAPH_TRAVERSAL.py` | B | Только имя в дереве (стр. 3944) | ☐ Я ☐ Агент |
+| 7 | `04_knowledge/ingestion/EMBEDDING.py` | B | Только имя в дереве (стр. 3935) | ☑ Агент → `kernel/knowledge/ingestion/embedding.py` |
+| 8 | `04_knowledge/retrieval/HYBRID_SEARCH.py` | B | Только имя в дереве (стр. 3943) | ☑ Агент → `kernel/knowledge/storage/qdrant_store.py (hybrid_search)` |
+| 9 | `04_knowledge/retrieval/GRAPH_TRAVERSAL.py` | B | Только имя в дереве (стр. 3944) | ☑ Агент → `kernel/knowledge/storage/graph_store.py` |
 
 ## Часть 5 — Вертикаль SaaS Web
 
