@@ -18,7 +18,7 @@
 | 5 | Вертикаль SaaS Web — до первого собранного проекта | ✅ скиллы и гейты (проверено `next build`); запуск с LLM ждёт ключей |
 | 4 | Knowledge (RAG): парсинг кода, Qdrant, граф кода, поиск для planner/coder/fixer | ✅ (проверено на тестовом репо офлайн-эмбеддером; с реальными эмбеддингами/LLM-обогащением не запускалось — нет ключей) |
 | 6 | Ops: CI/CD, наблюдаемость, бюджет, HITL API, деплой | ✅ метрики, трейсы, JSON-логи, бюджет (run/день/токены в минуту), отчёт о расходах, API run и HITL + WebSocket, Docker/compose/Helm/Terraform. Helm проверен `helm lint/template` и схемой k8s; Docker, kind, Trivy, `terraform plan` — только в CI (здесь нет Docker и реестров) |
-| 7 | Gateway: API, роутер, оркестратор, auth, CLI | — |
+| 7 | Gateway: API, роутер, оркестратор, auth, CLI | ✅ `/v1` API (ключи API и JWT, роли, лимиты по тарифу, идемпотентность, SSE, webhooks), выбор вертикали, композиция нескольких вертикалей с общими контрактами, CLI `autogen`. Проверено тестами на фейковых вертикалях: реальная вертикаль пока одна (`saas_web`), с LLM не запускалось — нет ключей (ISSUES G-11) |
 
 Порядок: сначала «тонкий срез» Kernel → Infra → Skills → SaaS Web до первого рабочего результата, затем Knowledge, Ops, Gateway.
 
@@ -49,7 +49,14 @@ kernel/
   llm/cost_report.py  autogen-costs — отчёт о расходах по дням / моделям / вертикалям / run
   service/runs.py     RunManager: run в фоне, очередь, шина событий
   api/                FastAPI: /health, /metrics, /runs/{id}, /runs/{id}/logs, /runs/{id}/interrupt, WS /ws/runs/{id}
-  main.py             python -m kernel.main serve | check | migrate
+  main.py             python -m kernel.main serve | check | migrate | keys | token
+  gateway/            публичный API /v1 (фаза 7):
+    app.py            generate, runs, SSE, HITL под /v1, compositions, X-Request-ID, webhooks
+    router.py         выбор вертикали: явная → ключевые слова → tech_stack → LLM → по умолчанию
+    auth.py           ключи API / JWT, роли viewer < developer < admin, лимиты rpm / rpd / concurrent
+    store.py          SQLite: ключи (SHA-256), реестр run, идемпотентность, композиции
+    composer.py       композиция: план LLM → контракты shared/ → подпроекты по уровням DAG → архив
+    cli.py            autogen — клиент командной строки
   knowledge/          база знаний (RAG):
     ingestion/        parsers (tree-sitter: TS/TSX/JS, Python, Go), chunking + граф, enrichment (LLM),
                       embedding (litellm / офлайн hashing, BM25 sparse), pipeline (инкрементальный)
@@ -60,6 +67,7 @@ tests/kernel/         unit + e2e на фейковом LLM; E2B, docker и litel
 verticals/saas_web/   вертикаль Next.js + tRPC + Prisma + Auth.js (см. verticals/saas_web/README.md)
 tests/verticals/      загрузка вертикали, хелперы хуков, парсеры, рендер цепочки скиллов
 tests/knowledge/      парсеры, чанки, Qdrant, граф, ingestion → retrieval, подключение к графу ядра
+tests/gateway/        роутер, auth и лимиты, API /v1, композиция, CLI
 tests/ops/            метрики, трейсы, бюджет, API и WebSocket, конфиг LiteLLM, статические проверки деплоя
 deploy/               Dockerfile, docker-compose, Helm, Terraform AWS, LiteLLM, Prometheus, Grafana (deploy/README.md)
 docs/ops/             LangSmith, кэширование, песочницы в эксплуатации
@@ -111,17 +119,51 @@ pip install -e ".[ops,llm,postgres]"
 python -m kernel.main serve --port 8000      # API: /docs, метрики: /metrics
 ```
 
-Run встаёт на паузу для решения человека (`plan_review`, `gate_failure`, `budget_exceeded`, ...):
-`GET /runs/{id}/interrupt` — что нужно решить и какие действия доступны,
-`POST /runs/{id}/interrupt` с `{"action": "approve" | "edit" | "reject" | "retry" | "skip_gate" | "abort", "comment": ..., "edited_data": {...}}`.
-Живые события — `WS /ws/runs/{id}`. Запуск run через HTTP (`POST /generate`) появится в фазе 7 (Gateway).
+Все маршруты API — под `/v1`, с авторизацией (кроме `/health`, `/metrics`, `/docs`). Ключ API:
+
+```bash
+python -m kernel.main keys create --tenant acme --user alice --role developer   # ключ показывается один раз
+python -m kernel.main keys list | keys revoke <префикс>
+python -m kernel.main token --tenant acme --user alice    # JWT HS256 (нужен AUTOGEN_GATEWAY__JWT_SECRET)
+AUTOGEN_GATEWAY__AUTH_ENABLED=false                       # только для локальной отладки
+```
+
+| Метод | Путь | Что делает |
+|---|---|---|
+| POST | `/v1/generate` | запуск: 202 + `Location`; заголовок `Idempotency-Key`; без `vertical_id` вертикаль выбирается автоматически |
+| GET | `/v1/verticals`, `/v1/verticals/{id}` | доступные вертикали |
+| GET | `/v1/runs`, `/v1/runs/{id}` | список run тенанта, статус |
+| GET | `/v1/runs/{id}/logs` | лог: JSON или SSE (`Accept: text/event-stream`, `Last-Event-ID`) |
+| GET | `/v1/runs/{id}/events` | SSE: узлы графа, пауза, завершение |
+| GET / POST | `/v1/runs/{id}/interrupt` | пауза для решения человека / решение `{"action", "comment", "edited_data"}` |
+| DELETE | `/v1/runs/{id}` | отменить |
+| GET | `/v1/runs/{id}/artifact` | архив готового проекта |
+| WS | `/v1/ws/runs/{id}` | живые события (`?access_token=` для браузера) |
+| POST | `/v1/compositions` | система из нескольких вертикалей; `plan` — готовый план, `dry_run` — только план |
+| GET / DELETE | `/v1/compositions/{id}` (+ `/events`, `/artifact`) | статус, SSE, отмена, общий архив |
+
+Лимиты по тарифу (`free` / `pro` / `enterprise`, `AUTOGEN_GATEWAY__TIERS`): запросов в минуту, генераций в сутки,
+одновременных run; при превышении — 429 и `Retry-After`. Для нескольких процессов лимиты хранятся в Redis
+(`AUTOGEN_GATEWAY__REDIS_URL`). `webhook_url` получает POST при остановке run (подпись `X-Autogen-Signature`,
+если задан `AUTOGEN_GATEWAY__WEBHOOK_SECRET`).
+
+CLI (`pip install -e ".[cli]"`):
+
+```bash
+export AUTOGEN_API_URL=http://localhost:8000 AUTOGEN_API_KEY=agk_acme_...
+autogen verticals
+autogen generate "Todo app with auth" --watch --download ./out   # на паузах спрашивает решение
+autogen compose "Next.js frontend + billing API + Terraform" --dry-run --save-plan plan.json
+autogen compose --plan plan.json --watch --download ./out
+```
+
 Развёртывание — [`deploy/README.md`](deploy/README.md).
 
 ## Разработка
 
 ```bash
 python3.11 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev,knowledge,ops,llm]" # + ".[postgres]", ".[e2b]"
+pip install -e ".[dev,knowledge,ops,llm,cli]" # + ".[postgres]", ".[e2b]"
 
 ruff check . && ruff format --check .
 mypy kernel

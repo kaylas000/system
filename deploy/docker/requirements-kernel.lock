@@ -4,14 +4,17 @@ aiosignal==1.4.0          # via aiohttp
 annotated-doc==0.0.5      # via fastapi
 annotated-types==0.8.0    # via pydantic
 anyio==4.15.1             # via httpx, httpx2, langsmith, openai, starlette, watchfiles
+async-timeout==5.0.1      # via redis
 attrs==26.1.0             # via aiohttp, e2b, jsonschema, referencing
 boto3==1.43.101           # via litellm
 botocore==1.43.101        # via boto3, s3transfer
 bracex==3.0.1             # via wcmatch
 certifi==2026.7.22        # via httpcore, httpx, requests
+cffi==2.1.1               # via cryptography
 charset-normalizer==3.5.1  # via requests
 click==8.5.0              # via huggingface-hub, litellm, uvicorn
 connectrpc==0.11.1        # via e2b
+cryptography==50.0.1      # via pyjwt
 distro==1.9.0             # via langsmith, openai
 dockerfile-parse==2.0.1   # via e2b
 e2b==2.51.0               # via autogen-platform (pyproject.toml)
@@ -76,15 +79,18 @@ protobuf-py-ext==0.1.1    # via protobuf-py
 psycopg==3.3.6            # via langgraph-checkpoint-postgres, autogen-platform (pyproject.toml)
 psycopg-binary==3.3.6     # via psycopg
 psycopg-pool==3.3.3       # via langgraph-checkpoint-postgres, psycopg
+pycparser==3.0            # via cffi
 pydantic==2.13.5          # via fastapi, langchain-core, langgraph, langsmith, litellm, openai, pydantic-settings, qdrant-client, autogen-platform (pyproject.toml)
 pydantic-core==2.46.5     # via pydantic
 pydantic-settings==2.15.0  # via litellm, autogen-platform (pyproject.toml)
 pygments==2.21.0          # via rich
+pyjwt==2.15.0             # via autogen-platform (pyproject.toml)
 pyqwest==0.10.0           # via connectrpc, e2b
 python-dateutil==2.9.0.post0  # via botocore, e2b
 python-dotenv==1.2.3      # via litellm, pydantic-settings, uvicorn
 pyyaml==6.0.3             # via huggingface-hub, langchain-core, uvicorn, autogen-platform (pyproject.toml)
 qdrant-client==1.19.1     # via autogen-platform (pyproject.toml)
+redis==8.1.0              # via autogen-platform (pyproject.toml)
 referencing==0.37.0       # via jsonschema, jsonschema-specifications
 regex==2026.9.10          # via tiktoken
 requests==2.34.2          # via langsmith, requests-toolbelt, tiktoken

@@ -60,6 +60,8 @@ spec:
               value: /data/llm_usage.sqlite
             - name: AUTOGEN_ARTIFACTS__LOCAL_DIR
               value: /data/artifacts
+            - name: AUTOGEN_GATEWAY__DB_PATH   # API keys, run registry, compositions
+              value: /data/gateway.sqlite
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

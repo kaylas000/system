@@ -1,5 +1,5 @@
 # AWS infrastructure for the kernel (written by the agent from specs/06_ops/deployment/TERRAFORM/main.tf).
-# Spec defects fixed (ISSUES O-xx): undefined module.rds_sg / module.redis_sg / module.elasticache_subnet_group
+# Spec defects fixed (ISSUES O-06): undefined module.rds_sg / module.redis_sg / module.elasticache_subnet_group
 # and variables, single-line blocks with two arguments, inline S3 bucket arguments removed in AWS provider v4+,
 # `module.eks.kubeconfig` (no such output), IRSA module input `role_map` (does not exist), AWS-managed
 # SecretsManagerReadWrite + AmazonS3FullAccess policies (least privilege instead), EKS 1.28 / AL2 AMI (EOL),

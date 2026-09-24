@@ -14,7 +14,7 @@ need shared state and must act *before* an LLM call:
 ``BudgetExceededError`` raised here is turned into a ``BUDGET_EXCEEDED`` interrupt by the graph
 wrapper, so the human can raise the limit and resume.
 
-Spec defects fixed (ISSUES O-xx): one global ``BudgetState`` shared by all runs (run costs mixed up),
+Spec defects fixed (ISSUES O-02): one global ``BudgetState`` shared by all runs (run costs mixed up),
 ``reset_run`` sets tokens to ``0.0``, ``asyncio.sleep`` while holding the lock (blocks every run),
 ``TokenUsage`` has no ``cost_usd`` for the ``vertical`` signature used, alerts only ``print``.
 """
@@ -108,7 +108,7 @@ class InMemoryUsageStore:
 
 
 class SqliteUsageStore:
-    """Single-node persistent store. For several API replicas use a shared DB (ISSUES O-xx)."""
+    """Single-node persistent store. For several API replicas use a shared DB (ISSUES O-15)."""
 
     def __init__(self, path: str | Path) -> None:
         if str(path) != ":memory:":

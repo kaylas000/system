@@ -46,7 +46,8 @@ def get_manager(request: Request) -> RunManager:
     return manager
 
 
-def build_hitl_router(dependencies: Sequence[params.Depends] | None = None) -> APIRouter:
+def build_hitl_router(dependencies: Sequence[params.Depends] | None = None, include_logs: bool = True) -> APIRouter:
+    """``include_logs=False``: the caller serves ``/runs/{run_id}/logs`` itself (the gateway adds SSE)."""
     router = APIRouter(tags=["runs"], dependencies=list(dependencies or []))
 
     @router.get("/runs/{run_id}")
@@ -56,15 +57,17 @@ def build_hitl_router(dependencies: Sequence[params.Depends] | None = None) -> A
         except RunNotFoundError:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found") from None
 
-    @router.get("/runs/{run_id}/logs")
-    async def run_logs(
-        run_id: str, request: Request, offset: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=2000)
-    ) -> dict[str, Any]:
-        try:
-            lines = await get_manager(request).logs(run_id, offset, limit)
-        except RunNotFoundError:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found") from None
-        return {"run_id": run_id, "offset": offset, "logs": lines}
+    if include_logs:
+
+        @router.get("/runs/{run_id}/logs")
+        async def run_logs(
+            run_id: str, request: Request, offset: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=2000)
+        ) -> dict[str, Any]:
+            try:
+                lines = await get_manager(request).logs(run_id, offset, limit)
+            except RunNotFoundError:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found") from None
+            return {"run_id": run_id, "offset": offset, "logs": lines}
 
     @router.get("/runs/{run_id}/interrupt", response_model=InterruptPayload)
     async def get_interrupt(run_id: str, request: Request) -> dict[str, Any]:

@@ -1,7 +1,7 @@
-# Written by the agent from specs/06_ops/deployment/HELM_CHART/values.yaml (ISSUES O-xx for changes).
+# Written by the agent from specs/06_ops/deployment/HELM_CHART/values.yaml (ISSUES O-14 for changes).
 
 # Runs and the WebSocket event bus live in the pod's memory; checkpoints are in Postgres.
-# Keep 1 replica until the run queue / event bus are moved to Redis (ISSUES O-xx) — with more
+# Keep 1 replica until the run queue / event bus are moved to Redis (ISSUES O-15) — with more
 # replicas a human decision or WebSocket may hit a pod that does not execute the run.
 replicaCount: 1
 
@@ -61,10 +61,21 @@ config:
   AUTOGEN_BUDGET__MAX_COST_USD_PER_DAY: "50"
   AUTOGEN_BUDGET__MAX_COST_USD_PER_RUN: "5"
   AUTOGEN_OBSERVABILITY__OTEL_ENDPOINT: http://otel-collector:4317
+  # Gateway (/v1): auth is on by default; issue keys with `kubectl exec ... python -m kernel.main keys create`
+  AUTOGEN_GATEWAY__AUTH_ENABLED: "true"
+  # AUTOGEN_GATEWAY__REDIS_URL (redis://:<password>@redis:6379/0) belongs in the Secret; without it rate limits
+  # are per process (fine for the single replica)
+  AUTOGEN_GATEWAY__DEFAULT_TIER: pro
+  # AUTOGEN_GATEWAY__PUBLIC_BASE_URL: https://autogen.example.com   # absolute stream/status URLs behind ingress
+  # AUTOGEN_GATEWAY__JWKS_URL: https://<tenant>.auth0.com/.well-known/jwks.json
+  # AUTOGEN_GATEWAY__JWT_ISSUER: https://<tenant>.auth0.com/
+  # AUTOGEN_GATEWAY__JWT_AUDIENCE: autogen-api
 
 # Secrets: reference an existing Secret (recommended: External Secrets / Secrets Manager CSI).
 # Keys expected in it (all optional except the DSN): AUTOGEN_DATABASE__POSTGRES_DSN, AUTOGEN_LLM__API_KEY,
-# AUTOGEN_SANDBOX__API_KEY, AUTOGEN_OBSERVABILITY__LANGSMITH_API_KEY, AUTOGEN_BUDGET__ALERT_WEBHOOK_URL
+# AUTOGEN_SANDBOX__API_KEY, AUTOGEN_OBSERVABILITY__LANGSMITH_API_KEY, AUTOGEN_BUDGET__ALERT_WEBHOOK_URL,
+# AUTOGEN_GATEWAY__JWT_SECRET (HS256 tokens), AUTOGEN_GATEWAY__WEBHOOK_SECRET (webhook signatures),
+# AUTOGEN_GATEWAY__REDIS_URL
 existingSecret: autogen-secrets
 # For quick tests only (rendered into a Secret in plain values — do not use in production):
 secrets: {}

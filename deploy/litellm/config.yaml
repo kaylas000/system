@@ -1,5 +1,5 @@
 # LiteLLM Proxy config (written by the agent from specs/06_ops/cost_control/MODEL_ROUTER.yaml;
-# fixes: ISSUES O-xx — `general` -> `general_settings`, invalid strategy "cost-optimized",
+# fixes: ISSUES O-12 — `general` -> `general_settings`, invalid strategy "cost-optimized",
 # cache under `litellm_settings`, fallbacks in `router_settings`, no plaintext master key,
 # non-existent callback `kernel.cost_control...` removed — budgets are enforced in the kernel
 # by kernel.llm.budget.BudgetManager).

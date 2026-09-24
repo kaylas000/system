@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from kernel.config import Settings
 from kernel.gateway.cli import Api, cli
 from tests.gateway.test_api import Env
-from tests.gateway.test_composer import SmartLLM, _plan
+from tests.gateway.test_composition import SmartLLM, _plan
 from tests.kernel.fakes import code, plan
 
 
@@ -123,3 +123,36 @@ def test_compose_commands(harness_factory: Any, tmp_path: Path) -> None:
     assert "api" in r.output and "infra" in r.output and "completed" in r.output
     r = h("--json", "runs", "--parent", cid)
     assert len(json.loads(r.output)) == 3
+
+
+def test_config_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kernel.gateway import cli as cli_mod
+
+    conf = tmp_path / "config.yaml"
+    conf.write_text(
+        "default_profile: prod\nprofiles:\n  prod: {url: 'https://api.example.com/v1', key: agk_p_1}\n"
+        "  local: {url: 'http://localhost:9000', token: tok}\n"
+    )
+    monkeypatch.setenv("AUTOGEN_CONFIG", str(conf))
+    for var in ("AUTOGEN_API_URL", "AUTOGEN_API_KEY", "AUTOGEN_TOKEN", "AUTOGEN_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    seen: list[Api] = []
+
+    class Capture(Api):
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            super().__init__(*a, **kw)
+            seen.append(self)
+
+    monkeypatch.setattr(cli_mod, "Api", Capture)
+    runner = CliRunner()
+    runner.invoke(cli, ["composition", "--help"], obj={})
+    assert (
+        str(seen[-1].client.base_url) == "https://api.example.com" and seen[-1].client.headers["x-api-key"] == "agk_p_1"
+    )
+    runner.invoke(cli, ["-p", "local", "composition", "--help"], obj={})
+    assert str(seen[-1].client.base_url) == "http://localhost:9000"
+    assert seen[-1].client.headers["authorization"] == "Bearer tok"
+    runner.invoke(cli, ["--key", "agk_x_2", "composition", "--help"], obj={})
+    assert seen[-1].client.headers["x-api-key"] == "agk_x_2"
+    r = runner.invoke(cli, ["-p", "nope", "composition", "--help"], obj={})
+    assert r.exit_code == 2 and "not found" in r.output

@@ -31,12 +31,18 @@ services:
       AUTOGEN_BUDGET__ALERT_WEBHOOK_URL: ${BUDGET_ALERT_WEBHOOK_URL:-}
       AUTOGEN_OBSERVABILITY__OTEL_ENDPOINT: ${OTEL_ENDPOINT:-}
       AUTOGEN_OBSERVABILITY__LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      # Gateway /v1: keys via `docker compose exec kernel python -m kernel.main keys create --tenant dev --user me`
+      AUTOGEN_GATEWAY__AUTH_ENABLED: ${GATEWAY_AUTH_ENABLED:-true}
+      AUTOGEN_GATEWAY__REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379/0
+      AUTOGEN_GATEWAY__JWT_SECRET: ${GATEWAY_JWT_SECRET:-}
+      AUTOGEN_GATEWAY__WEBHOOK_SECRET: ${GATEWAY_WEBHOOK_SECRET:-}
     volumes:
       - kernel-data:/data
     depends_on:
       postgres: {condition: service_healthy}
       qdrant: {condition: service_started}
       litellm: {condition: service_healthy}
+      redis: {condition: service_healthy}
 
   litellm:
     <<: *restart

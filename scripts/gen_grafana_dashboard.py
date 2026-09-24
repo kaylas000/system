@@ -1,7 +1,7 @@
 """
 Generate the Grafana dashboard for the kernel metrics (written by the agent; replaces
 specs/06_ops/observability/GRAFANA_DASHBOARDS.json whose queries use metric names that do not exist —
-ISSUES O-xx). Every PromQL metric is checked against ``kernel.observability.metrics`` in tests.
+ISSUES O-11). Every PromQL metric is checked against ``kernel.observability.metrics`` in tests.
 
     python scripts/gen_grafana_dashboard.py > deploy/grafana/dashboards/autogen-ops.json
 """

@@ -34,7 +34,7 @@ tech_stack:
   linting: "eslint@8 (next/core-web-vitals)"
   ci: "github-actions"
 
-# Gateway routing (agent addition, ISSUES G-xx): keywords for the rule-based router; tech_stack is used
+# Gateway routing (agent addition, ISSUES G-04): keywords for the rule-based router; tech_stack is used
 # for capability matching, the description for the LLM classifier.
 routing:
   keywords: [next.js, nextjs, react, saas, dashboard, admin panel, landing page, web app, website, tailwind,

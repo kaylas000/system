@@ -91,16 +91,16 @@
 
 | # | Файл | Пр. | Что о файле известно из ТЗ | Решение |
 |---|---|---|---|---|
-| 43 | `api/ROUTES.py` | B | Эндпоинты описаны в `OPENAPI_SPEC.yaml` | ☐ Я ☐ Агент |
-| 44 | `api/MIDDLEWARE.py` | B | Только имя в дереве | ☐ Я ☐ Агент |
-| 45 | `api/WEBSOCKETS.py` | B | Только имя в дереве | ☐ Я ☐ Агент |
-| 46 | `router/ROUTER.py` | B | Только имя в дереве (классификатор `CLASSIFIER.py` есть) | ☐ Я ☐ Агент |
-| 47 | `router/CAPABILITY_MATCHER.py` | B | Только имя в дереве | ☐ Я ☐ Агент |
-| 48 | `orchestrator/CONTRACT_RESOLVER.py` | B | Только имя в дереве | ☐ Я ☐ Агент |
-| 49 | `orchestrator/DEPENDENCY_GRAPH.py` | B | Только имя в дереве | ☐ Я ☐ Агент |
-| 50 | `auth/QUOTAS.py` | B | Только имя в дереве | ☐ Я ☐ Агент |
-| 51 | `auth/API_KEYS.py` | B | Только имя в дереве | ☐ Я ☐ Агент |
-| 52 | `cli/CONFIG.yaml` | B | Только имя в дереве | ☐ Я ☐ Агент |
+| 43 | `api/ROUTES.py` | B | Эндпоинты описаны в `OPENAPI_SPEC.yaml` | ☑ Агент → `kernel/gateway/app.py` (`/v1`, FastAPI) |
+| 44 | `api/MIDDLEWARE.py` | B | Только имя в дереве | ☑ Агент → `kernel/gateway/app.py` (`RequestIDMiddleware`, `run_guard`) + `auth.py` |
+| 45 | `api/WEBSOCKETS.py` | B | Только имя в дереве | ☑ Агент → `kernel/api/hitl.py` под `/v1` с авторизацией (`WS /v1/ws/runs/{id}`); SSE в `app.py` |
+| 46 | `router/ROUTER.py` | B | Только имя в дереве (классификатор `CLASSIFIER.py` есть) | ☑ Агент → `kernel/gateway/router.py` (`VerticalRouter`) |
+| 47 | `router/CAPABILITY_MATCHER.py` | B | Только имя в дереве | ☑ Агент → `kernel/gateway/router.py` (`capability_scores`) |
+| 48 | `orchestrator/CONTRACT_RESOLVER.py` | B | Только имя в дереве | ☑ Агент → `kernel/gateway/composer.py` (контракты `shared/`, `provides`/`contracts`) |
+| 49 | `orchestrator/DEPENDENCY_GRAPH.py` | B | Только имя в дереве | ☑ Агент → `kernel/gateway/composer.py` (`topo_levels`, `validate_plan`) |
+| 50 | `auth/QUOTAS.py` | B | Только имя в дереве | ☑ Агент → `kernel/gateway/auth.py` (`InMemoryRateLimiter`, `RedisRateLimiter`) |
+| 51 | `auth/API_KEYS.py` | B | Только имя в дереве | ☑ Агент → `kernel/gateway/store.py` + `python -m kernel.main keys` |
+| 52 | `cli/CONFIG.yaml` | B | Только имя в дереве | ☑ Агент → профили CLI `~/.config/autogen/config.yaml` (`kernel/gateway/cli.py`) |
 
 ---
 

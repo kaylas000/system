@@ -1,6 +1,6 @@
 """
 Cross-vertical composition — "The Composer" (``specs/07_gateway/orchestrator/CROSS_VERTICAL.py``,
-``GATEWAY_ARCH.md`` §3; rewritten by the agent, spec defects: ISSUES G-xx).
+``GATEWAY_ARCH.md`` §3; rewritten by the agent, spec defects: ISSUES G-06).
 
 Flow of one composition:
 
@@ -19,7 +19,7 @@ Flow of one composition:
    ``shared/`` contracts, and generated glue: ``README.md``, ``ARCHITECTURE.md``, ``docker-compose.yml``
    (sub-projects with a root ``Dockerfile``), ``Makefile``.
 
-Not implemented (ISSUES G-xx): running the integration tests (``docker compose up`` + contract tests)
+Not implemented (ISSUES G-10): running the integration tests (``docker compose up`` + contract tests)
 and ``skaffold.yaml``; they are listed in the generated README as a checklist.
 """
 

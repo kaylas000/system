@@ -802,5 +802,5 @@ def create_gateway_app(
 
     app.add_middleware(RequestIDMiddleware)
     app.include_router(build_gateway_router())
-    app.include_router(build_hitl_router([Depends(run_guard)]), prefix="/v1")
+    app.include_router(build_hitl_router([Depends(run_guard)], include_logs=False), prefix="/v1")
     return app

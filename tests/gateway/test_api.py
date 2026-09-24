@@ -86,6 +86,10 @@ async def test_auth_required_and_request_id(tmp_path: Path, settings: Settings) 
         assert (await c.post("/v1/generate", json={"prompt": "x"})).status_code == 401
         assert (await c.get("/v1/runs/whatever")).status_code == 401
         assert (await c.get("/runs/whatever")).status_code == 404  # unauthenticated kernel routes are not mounted
+        schema = (await c.get("/openapi.json")).json()
+        for path in ("/v1/generate", "/v1/runs", "/v1/runs/{run_id}/interrupt", "/v1/compositions", "/v1/verticals"):
+            assert path in schema["paths"], path
+        assert not any(p.startswith("/runs") for p in schema["paths"])
 
         h = await env.key(vertical_access=["fake"])
         r = await c.get("/v1/verticals", headers={**h, "X-Request-ID": "req-123"})

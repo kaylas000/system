@@ -7,7 +7,7 @@ OpenTelemetry tracing (``specs/06_ops/observability/OTEL_CONFIG.py``; rewritten 
   LLM client (``llm.chat``) and gates (``gate.<id>``).
 * ``setup_langsmith(settings)`` turns on LangGraph's native LangSmith tracing (env vars).
 
-Spec defects (ISSUES O-xx): module-level metric creation before ``setup_otel`` binds instruments to
+Spec defects (ISSUES O-10): module-level metric creation before ``setup_otel`` binds instruments to
 the no-op provider; ``trace_node`` expects ``(state, config)`` but reads the vertical from config;
 auto-instrumenting ``requests``/``logging`` required packages that are not dependencies.
 """

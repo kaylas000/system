@@ -9,7 +9,7 @@ vertical ids. A rule decision needs a clear winner (more distinct keyword hits t
 ties go to the next stage. When several verticals match strongly, ``candidates`` lists them — the
 gateway may offer a composition (``kernel.gateway.composer``).
 
-Spec defects fixed (ISSUES G-01, G-xx): ``method="fallback"`` outside the Literal; ``from typing:``;
+Spec defects fixed (ISSUES G-01, G-04): ``method="fallback"`` outside the Literal; ``from typing:``;
 an unknown explicit vertical was silently ignored (now an error); ``_match_rules`` counted patterns, not
 hits, so every match scored 1 (ties decided by dict order); ``await loader.discover()`` on a sync method;
 free-text LLM answer parsed with ``.strip().lower()`` (now structured output).

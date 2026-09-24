@@ -1,5 +1,5 @@
 # ЧТОБЫ ВКЛЮЧИТЬ: скопировать в .github/workflows/kernel-ci.yml (у токена агента нет права `workflows`).
-# Kernel CI/CD (written by the agent from specs/06_ops/ci_cd/KERNEL_CI.yml; ISSUES S-02, O-xx).
+# Kernel CI/CD (written by the agent from specs/06_ops/ci_cd/KERNEL_CI.yml; ISSUES S-02, O-16).
 #   check        ruff, mypy --strict, pytest (py 3.11/3.12)
 #   integration  Postgres checkpointer + HITL resume across restart
 #   deploy-lint  hadolint, helm lint/template + kubeconform, terraform fmt/validate, LiteLLM config
@@ -39,7 +39,7 @@ jobs:
           cache: pip
       - uses: azure/setup-helm@v4
       - name: Install
-        run: pip install -e ".[dev,knowledge,ops,llm]"
+        run: pip install -e ".[dev,knowledge,ops,llm,cli]"
       - name: Ruff lint
         run: ruff check .
       - name: Ruff format

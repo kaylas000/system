@@ -24,6 +24,17 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile obs
 
 API: http://localhost:8000/docs · метрики: `/metrics` · Grafana: http://localhost:3000
 
+Публичный API — `/v1` (Gateway, фаза 7), авторизация включена. Выпустить ключ и проверить:
+
+```bash
+docker compose -f deploy/docker-compose.yml exec kernel python -m kernel.main keys create --tenant dev --user me --role admin
+export AUTOGEN_API_URL=http://localhost:8000 AUTOGEN_API_KEY=agk_dev_...
+autogen verticals                       # pip install -e ".[cli]"
+autogen generate "Todo app with auth" --watch --download ./out
+```
+
+Для локальной отладки без ключей: `GATEWAY_AUTH_ENABLED=false` в `deploy/.env` (все запросы — анонимный admin).
+
 ## Kubernetes
 
 ```bash
@@ -36,10 +47,14 @@ helm upgrade --install kernel deploy/helm/autogen-kernel -n autogen \
   --set image.repository=<registry>/autogen-kernel --set image.tag=<tag>
 ```
 
-LiteLLM, Postgres, Redis, Qdrant ставятся отдельно (управляемые сервисы или свои чарты).
+LiteLLM, Postgres, Redis, Qdrant ставятся отдельно (управляемые сервисы или свои чарты). Redis нужен Gateway
+для лимитов (`AUTOGEN_GATEWAY__REDIS_URL`); ключи API: `kubectl -n autogen exec deploy/kernel-autogen-kernel --
+python -m kernel.main keys create --tenant <t> --user <u>`. JWT: `AUTOGEN_GATEWAY__JWKS_URL` (Auth0/Clerk/Keycloak)
+или `AUTOGEN_GATEWAY__JWT_SECRET` в секрете.
 
 ## Ограничения
 
-- **Одна реплика ядра.** Запущенные run и события WebSocket живут в памяти процесса (чекпойнты — в Postgres). Для нескольких реплик нужна общая очередь и шина событий (Redis) — ISSUES O-xx.
-- Дневной лимит бюджета хранится в SQLite на томе `/data` — для одной реплики.
+- **Одна реплика ядра.** Запущенные run и события WebSocket живут в памяти процесса (чекпойнты — в Postgres). Для нескольких реплик нужна общая очередь и шина событий (Redis) — ISSUES O-15.
+- Дневной лимит бюджета, ключи API, реестр run и композиций хранятся в SQLite на томе `/data` — для одной реплики (ISSUES O-15, G-14).
+- Исходящие webhooks: NetworkPolicy ограничивает только вход; адреса webhook проверяются (запрещены приватные сети, `AUTOGEN_GATEWAY__ALLOW_PRIVATE_WEBHOOKS`).
 - Terraform: принятые находки checkov (CMK вместо ключей AWS, логирование S3, репликация) — на усмотрение владельца аккаунта.

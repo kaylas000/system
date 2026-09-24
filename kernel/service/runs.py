@@ -10,7 +10,7 @@ written by the agent).
   interrupt) — consumed by the WebSocket endpoint; late subscribers get the recent history;
 * ``resume`` validates the action against the interrupt payload before resuming (409/400 in the API).
 
-Spec defects fixed (ISSUES O-xx): ``background_tasks.resume_graph`` does not exist; the graph was
+Spec defects fixed (ISSUES O-03, O-08): ``background_tasks.resume_graph`` does not exist; the graph was
 rebuilt with a hard-coded ``saas_web`` vertical on every resume; the interrupt was read from
 ``checkpoint.metadata["interrupts"]`` (LangGraph keeps it in pending writes / ``StateSnapshot.tasks``).
 """

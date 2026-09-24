@@ -98,7 +98,7 @@ CHART = DEPLOY / "helm" / "autogen-kernel"
 def test_helm_values_env_names() -> None:
     values = yaml.safe_load((CHART / "values.yaml").read_text())
     assert all(settings_env_ok(k) for k in values["config"])
-    assert values["replicaCount"] == 1  # in-memory run manager (ISSUES O-xx)
+    assert values["replicaCount"] == 1  # in-memory run manager (ISSUES O-15)
 
 
 @pytest.mark.skipif(shutil.which("helm") is None, reason="helm not installed")

@@ -1,10 +1,11 @@
 """
 ``autogen`` — command-line client of the Gateway API (``specs/07_gateway/cli/AUTOGEN_CLI.py``; rewritten by
 the agent: the spec hard-coded ``ws://localhost``, sent ``X-API-Key: None`` and used the removed
-``websockets`` ``extra_headers`` argument — ISSUES G-xx). Live progress uses the SSE endpoints, which pass
+``websockets`` ``extra_headers`` argument — ISSUES G-07). Live progress uses the SSE endpoints, which pass
 through proxies and need no extra dependency.
 
-    export AUTOGEN_API_URL=https://api.example.com AUTOGEN_API_KEY=agk_...
+    export AUTOGEN_API_URL=https://api.example.com AUTOGEN_API_KEY=agk_...   # or profiles in
+    #   ~/.config/autogen/config.yaml (AUTOGEN_CONFIG), selected with --profile / AUTOGEN_PROFILE
     autogen verticals
     autogen generate "Build a SaaS with Stripe" --vertical saas_web --watch --download ./out
     autogen generate -f prd.md --hint database=postgres --context-file openapi.yaml
@@ -149,18 +150,65 @@ def _prompt_text(prompt: str | None, prompt_file: str | None) -> str:
     return prompt
 
 
+DEFAULT_URL = "http://localhost:8000"
+
+
+def config_path() -> Path:
+    import os
+
+    env = os.environ.get("AUTOGEN_CONFIG")
+    if env:
+        return Path(env)
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / "autogen" / "config.yaml"
+
+
+def load_config(profile: str | None) -> dict[str, Any]:
+    """``cli/CONFIG.yaml`` (no content in the spec; agent's format)::
+
+    default_profile: prod
+    profiles:
+      prod: {url: https://api.example.com, key: agk_acme_...}
+      local: {url: http://localhost:8000, token: eyJ...}
+    """
+    import yaml
+
+    path = config_path()
+    if not path.is_file():
+        if profile:
+            raise click.UsageError(f"profile {profile!r} requested but {path} does not exist")
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    name = profile or data.get("default_profile")
+    if not name:
+        return {}
+    profiles = data.get("profiles") or {}
+    if name not in profiles:
+        raise click.UsageError(f"profile {name!r} not found in {path}")
+    return dict(profiles[name] or {})
+
+
 @click.group()
-@click.option("--url", envvar="AUTOGEN_API_URL", default="http://localhost:8000", show_default=True)
+@click.option("--url", envvar="AUTOGEN_API_URL", help=f"gateway URL (default: profile or {DEFAULT_URL})")
 @click.option("--key", envvar="AUTOGEN_API_KEY", help="API key (agk_...)")
 @click.option("--token", envvar="AUTOGEN_TOKEN", help="JWT bearer token (if no API key)")
+@click.option("--profile", "-p", envvar="AUTOGEN_PROFILE", help="profile from ~/.config/autogen/config.yaml")
 @click.option("--json", "as_json", is_flag=True, help="print raw JSON")
 @click.pass_context
-def cli(ctx: click.Context, url: str, key: str | None, token: str | None, as_json: bool) -> None:
+def cli(
+    ctx: click.Context, url: str | None, key: str | None, token: str | None, profile: str | None, as_json: bool
+) -> None:
     """AutoGen Platform client."""
     obj = ctx.ensure_object(dict)
     obj.setdefault("api", None)
     if obj["api"] is None:
-        obj["api"] = Api(url, key, token)
+        conf = load_config(profile)
+        creds_given = bool(key or token)
+        obj["api"] = Api(
+            url or conf.get("url") or DEFAULT_URL,
+            key if creds_given else conf.get("key"),
+            token if creds_given else conf.get("token"),
+        )
     obj["json"] = as_json
 
 

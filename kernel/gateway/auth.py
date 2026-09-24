@@ -1,5 +1,5 @@
 """
-Authentication, RBAC and quotas (``specs/07_gateway/auth/AUTH_MANAGER.py``, fixes: ISSUES G-xx).
+Authentication, RBAC and quotas (``specs/07_gateway/auth/AUTH_MANAGER.py``, fixes: ISSUES G-05).
 
 * API keys ``agk_...`` (``X-API-Key`` or ``Authorization: Bearer agk_...``) — looked up by full SHA-256.
 * JWT (``Authorization: Bearer <jwt>``): HS256 secret, PEM public key or JWKS URL (Auth0/Clerk/Keycloak).

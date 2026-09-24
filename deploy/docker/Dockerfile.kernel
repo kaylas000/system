@@ -27,6 +27,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     AUTOGEN_KERNEL__VERTICALS_DIR=/app/verticals \
     AUTOGEN_BUDGET__USAGE_DB_PATH=/data/llm_usage.sqlite \
+    AUTOGEN_GATEWAY__DB_PATH=/data/gateway.sqlite \
     AUTOGEN_ARTIFACTS__LOCAL_DIR=/data/artifacts \
     AUTOGEN_VECTOR_DB__QDRANT_PATH=/data/qdrant
 # git: GitTool / packager (generated project history)
