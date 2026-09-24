@@ -1,6 +1,10 @@
-# ЧТОБЫ ВКЛЮЧИТЬ: скопировать в .github/workflows/kernel-ci.yml (токен агента не имеет права `workflows`).
-# Minimal kernel CI (phase 1). The full pipeline from specs/06_ops/ci_cd/KERNEL_CI.yml
-# (docker build, integration services, release) is added in phase 6 — see specs/ISSUES.md S-02.
+# ЧТОБЫ ВКЛЮЧИТЬ: скопировать в .github/workflows/kernel-ci.yml (у токена агента нет права `workflows`).
+# Kernel CI/CD (written by the agent from specs/06_ops/ci_cd/KERNEL_CI.yml; ISSUES S-02, O-xx).
+#   check        ruff, mypy --strict, pytest (py 3.11/3.12)
+#   integration  Postgres checkpointer + HITL resume across restart
+#   deploy-lint  hadolint, helm lint/template + kubeconform, terraform fmt/validate, LiteLLM config
+#   image        build kernel + knowledge images, Trivy scan, push to GHCR on main
+#   kind-smoke   install the Helm chart into kind with the built image, wait for /health
 name: Kernel CI
 
 on:
@@ -12,10 +16,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: kernel-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_KERNEL: ghcr.io/${{ github.repository_owner }}/autogen-kernel
+  IMAGE_KNOWLEDGE: ghcr.io/${{ github.repository_owner }}/autogen-knowledge
+
 jobs:
   check:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
@@ -24,8 +37,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      - uses: azure/setup-helm@v4
       - name: Install
-        run: pip install -e ".[dev,knowledge]"
+        run: pip install -e ".[dev,knowledge,ops,llm]"
       - name: Ruff lint
         run: ruff check .
       - name: Ruff format
@@ -33,6 +47,154 @@ jobs:
       - name: Mypy (strict)
         run: mypy kernel
       - name: Tests
+        env:
+          LITELLM_LOCAL_MODEL_COST_MAP: "True"
         run: pytest -q
       - name: Spec syntax report (non-blocking, see specs/ISSUES.md)
         run: python scripts/lint_specs.py
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: autogen_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev,ops,postgres]"
+      - name: Migrate
+        env:
+          AUTOGEN_DATABASE__POSTGRES_DSN: postgresql://postgres:postgres@localhost:5432/autogen_test
+        run: python -m kernel.main migrate
+      - name: Postgres integration tests
+        env:
+          AUTOGEN_TEST_POSTGRES_DSN: postgresql://postgres:postgres@localhost:5432/autogen_test
+        run: pytest -q tests/ops/test_postgres_integration.py -rs
+
+  deploy-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/docker/Dockerfile.kernel
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/docker/Dockerfile.knowledge
+      - uses: azure/setup-helm@v4
+      - name: Helm lint + kubeconform
+        run: |
+          helm lint deploy/helm/autogen-kernel --strict
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          helm template t deploy/helm/autogen-kernel \
+            --set ingress.enabled=true --set pdb.enabled=true --set autoscaling.enabled=true \
+            | ./kubeconform -strict -summary -kubernetes-version 1.33.0
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform fmt + validate
+        working-directory: deploy/terraform/aws
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: LiteLLM config
+        env:
+          LITELLM_LOCAL_MODEL_COST_MAP: "True"
+        run: |
+          pip install "litellm>=1.50" pyyaml
+          python scripts/check_litellm_config.py deploy/litellm/config.yaml
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [check]
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    strategy:
+      matrix:
+        include:
+          - name: kernel
+            dockerfile: deploy/docker/Dockerfile.kernel
+          - name: knowledge
+            dockerfile: deploy/docker/Dockerfile.knowledge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: autogen-${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Trivy scan (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: autogen-${{ matrix.name }}:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Save image for kind
+        if: matrix.name == 'kernel'
+        run: docker save autogen-kernel:ci -o /tmp/kernel.tar
+      - uses: actions/upload-artifact@v4
+        if: matrix.name == 'kernel'
+        with:
+          name: kernel-image
+          path: /tmp/kernel.tar
+          retention-days: 1
+      - name: Push to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          if [ "${{ matrix.name }}" = kernel ]; then IMAGE="$IMAGE_KERNEL"; else IMAGE="$IMAGE_KNOWLEDGE"; fi
+          for tag in "${GITHUB_SHA::12}" latest; do
+            docker tag "autogen-${{ matrix.name }}:ci" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+
+  kind-smoke:
+    runs-on: ubuntu-latest
+    needs: [image]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-image
+          path: /tmp
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: autogen
+      - uses: azure/setup-helm@v4
+      - name: Install chart
+        run: |
+          docker load -i /tmp/kernel.tar
+          kind load docker-image autogen-kernel:ci --name autogen
+          helm install kernel deploy/helm/autogen-kernel --wait --timeout 5m \
+            --set image.repository=autogen-kernel --set image.tag=ci --set image.pullPolicy=Never \
+            --set existingSecret="" --set networkPolicy.enabled=false \
+            --set config.AUTOGEN_SANDBOX__PROVIDER=local
+      - name: Health check
+        run: |
+          kubectl port-forward svc/kernel-autogen-kernel 8000:8000 &
+          sleep 5
+          curl -fsS http://localhost:8000/health
+          curl -fsS http://localhost:8000/metrics | grep -q autogen_
+      - name: Logs on failure
+        if: failure()
+        run: kubectl logs deploy/kernel-autogen-kernel --tail=200 || true

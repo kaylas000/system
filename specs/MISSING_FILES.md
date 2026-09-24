@@ -67,25 +67,25 @@
 
 | # | Файл | Пр. | Что о файле известно из ТЗ (комментарий в дереве) | Решение |
 |---|---|---|---|---|
-| 24 | `ci_cd/RELEASE_WORKFLOW.yml` | B | «Semantic Release / Changelog» | ☐ Я ☐ Агент |
-| 25 | `ci_cd/SECURITY_SCAN.yml` | B | «SAST/DAST/Deps Scan» | ☐ Я ☐ Агент |
-| 26 | `observability/LANGSMITH_SETUP.md` | B | — | ☐ Я ☐ Агент |
-| 27 | `observability/METRICS.py` | B | «Prometheus Metrics Definitions» | ☐ Я ☐ Агент |
-| 28 | `observability/LOGGING_CONFIG.py` | B | «Structured Logging (JSON)» | ☐ Я ☐ Агент |
-| 29 | `cost_control/CACHE_STRATEGY.md` | B | «Prompt/Embedding/Response Caching» | ☐ Я ☐ Агент |
-| 30 | `cost_control/COST_REPORTER.py` | B | «Daily/Run Cost Reports» | ☐ Я ☐ Агент |
-| 31 | `hitl/WEBSOCKET_MANAGER.py` | B | «Real-time Log/State Streaming» | ☐ Я ☐ Агент |
-| 32 | `hitl/UI_COMPONENTS.md` | B | «React Components Spec (for Frontend Team)» | ☐ Я ☐ Агент |
-| 33 | `hitl/APPROVAL_WORKFLOW.py` | B | «Approve/Edit/Abort Logic» (частично уже реализовано в ядре, `human_review`) | ☐ Я ☐ Агент |
-| 34 | `deployment/DOCKERCOMPOSE.yml` | B | «Local Dev Stack (Kernel, DBs, Sandboxes)» | ☐ Я ☐ Агент |
-| 35 | `deployment/HELM_CHART/Chart.yaml` | B | — (есть `values.yaml`) | ☐ Я ☐ Агент |
-| 36 | `deployment/HELM_CHART/templates/` | B | — | ☐ Я ☐ Агент |
-| 37 | `deployment/TERRAFORM/modules/` | B | — (есть `main.tf`) | ☐ Я ☐ Агент |
-| 38 | `deployment/TERRAFORM/environments/` | B | — | ☐ Я ☐ Агент |
-| 39 | `deployment/SANDBOX_DEPLOYMENT.md` | B | «E2B/Daytona/Modal Scaling Config» | ☐ Я ☐ Агент |
-| 40 | `scripts/DEPLOY.sh` | B | — | ☐ Я ☐ Агент |
-| 41 | `scripts/MIGRATE_DB.sh` | B | — | ☐ Я ☐ Агент |
-| 42 | `scripts/SEED_KNOWLEDGE.sh` | B | — | ☐ Я ☐ Агент |
+| 24 | `ci_cd/RELEASE_WORKFLOW.yml` | B | «Semantic Release / Changelog» | ☑ Агент (частично) → `ci/kernel-ci.yml`: сборка и публикация образа в GHCR; semantic-release/changelog не делался |
+| 25 | `ci_cd/SECURITY_SCAN.yml` | B | «SAST/DAST/Deps Scan» | ☑ Агент (частично) → `ci/kernel-ci.yml`: Trivy (образы), hadolint, checkov вручную; SAST/DAST не делались |
+| 26 | `observability/LANGSMITH_SETUP.md` | B | — | ☑ Агент → `docs/ops/LANGSMITH_SETUP.md` |
+| 27 | `observability/METRICS.py` | B | «Prometheus Metrics Definitions» | ☑ Агент → `kernel/observability/metrics.py` |
+| 28 | `observability/LOGGING_CONFIG.py` | B | «Structured Logging (JSON)» | ☑ Агент → `kernel/observability/logging_config.py` |
+| 29 | `cost_control/CACHE_STRATEGY.md` | B | «Prompt/Embedding/Response Caching» | ☑ Агент → `docs/ops/CACHE_STRATEGY.md` |
+| 30 | `cost_control/COST_REPORTER.py` | B | «Daily/Run Cost Reports» | ☑ Агент → `kernel/llm/cost_report.py` (`autogen-costs`) |
+| 31 | `hitl/WEBSOCKET_MANAGER.py` | B | «Real-time Log/State Streaming» | ☑ Агент → `kernel/service/runs.py` (EventBus) + `kernel/api/hitl.py` (`WS /ws/runs/{id}`) |
+| 32 | `hitl/UI_COMPONENTS.md` | B | «React Components Spec (for Frontend Team)» | ☐ не делался — UI нет |
+| 33 | `hitl/APPROVAL_WORKFLOW.py` | B | «Approve/Edit/Abort Logic» (частично уже реализовано в ядре, `human_review`) | ☑ Агент → `kernel/service/runs.py` (`RunManager.resume`) + `kernel/api/hitl.py`; логика решений — `human_review` ядра |
+| 34 | `deployment/DOCKERCOMPOSE.yml` | B | «Local Dev Stack (Kernel, DBs, Sandboxes)» | ☑ Агент → `deploy/docker-compose.yml` |
+| 35 | `deployment/HELM_CHART/Chart.yaml` | B | — (есть `values.yaml`) | ☑ Агент → `deploy/helm/autogen-kernel/Chart.yaml` |
+| 36 | `deployment/HELM_CHART/templates/` | B | — | ☑ Агент → `deploy/helm/autogen-kernel/templates/` |
+| 37 | `deployment/TERRAFORM/modules/` | B | — (есть `main.tf`) | ☑ Агент → `deploy/terraform/aws/` (один корневой модуль) |
+| 38 | `deployment/TERRAFORM/environments/` | B | — | ☑ Агент → окружения через `var.environment` + `backend.hcl.example` |
+| 39 | `deployment/SANDBOX_DEPLOYMENT.md` | B | «E2B/Daytona/Modal Scaling Config» | ☑ Агент → `docs/ops/SANDBOX_DEPLOYMENT.md` |
+| 40 | `scripts/DEPLOY.sh` | B | — | ☑ Агент → `scripts/ops/deploy.sh` |
+| 41 | `scripts/MIGRATE_DB.sh` | B | — | ☑ Агент → `scripts/ops/migrate_db.sh` (`python -m kernel.main migrate`) |
+| 42 | `scripts/SEED_KNOWLEDGE.sh` | B | — | ☑ Агент → `scripts/ops/seed_knowledge.sh` |
 
 ## Часть 7 — Gateway
 

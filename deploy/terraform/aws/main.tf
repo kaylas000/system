@@ -83,6 +83,7 @@ module "eks" {
         max_size       = 10
         desired_size   = 0
         labels         = { workload = "sandbox" }
+
         taints = {
           sandbox = { key = "workload", value = "sandbox", effect = "NO_SCHEDULE" }
         }
@@ -271,6 +272,7 @@ resource "aws_secretsmanager_secret" "kernel" {
 
 resource "aws_secretsmanager_secret_version" "kernel" {
   secret_id = aws_secretsmanager_secret.kernel.id
+
   # keys = env var names read by kernel/config.py; LLM / E2B keys are added out of band
   secret_string = jsonencode({
     AUTOGEN_DATABASE__POSTGRES_DSN = "postgresql://autogen_admin:${random_password.db.result}@${aws_db_instance.postgres.endpoint}/autogen?sslmode=require"

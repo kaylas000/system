@@ -4,6 +4,7 @@ the spec has no content for this module — written by the agent).
 
     python -m kernel.main serve --host 0.0.0.0 --port 8000
     python -m kernel.main check        # print the resolved configuration (secrets masked) and exit
+    python -m kernel.main migrate      # create the Postgres checkpoint tables
 
 Wires everything from ``Settings`` (env ``AUTOGEN_*``): checkpointer (Postgres or in-memory),
 LiteLLM client, sandbox manager, budget manager, verticals from ``kernel.verticals_dir``,
@@ -13,6 +14,7 @@ optional knowledge retriever, logging/tracing, and serves ``kernel.api.create_ap
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
@@ -80,6 +82,19 @@ def build_app(settings: Settings | None = None) -> Any:
     return create_app(None, settings, setup=setup)
 
 
+async def migrate(settings: Settings) -> int:
+    """``AsyncPostgresSaver.setup()`` (idempotent). The service also runs it on start-up."""
+    from .persistence import open_checkpointer
+
+    if not settings.database.postgres_dsn:
+        print("AUTOGEN_DATABASE__POSTGRES_DSN is not set: nothing to migrate (in-memory checkpointer)", file=sys.stderr)
+        return 1
+    async with open_checkpointer(settings):
+        pass
+    print("checkpoint tables are up to date")
+    return 0
+
+
 def _masked(settings: Settings) -> dict[str, Any]:
     data: dict[str, Any] = json.loads(settings.model_dump_json())  # SecretStr -> "**********"
     return data
@@ -92,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8000)
     sub.add_parser("check", help="print resolved settings and discovered verticals")
+    sub.add_parser("migrate", help="create/upgrade the Postgres checkpoint tables and exit")
     a = ap.parse_args(argv)
 
     settings = get_settings()
@@ -102,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
         out = {"settings": _masked(settings), "verticals": sorted(loader.discover()), "errors": loader.errors}
         print(json.dumps(out, indent=2, default=str))
         return 0
+
+    if a.cmd == "migrate":
+        return asyncio.run(migrate(settings))
 
     import uvicorn
 

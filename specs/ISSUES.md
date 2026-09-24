@@ -94,7 +94,7 @@
 | KN-08 | `INGESTION_PIPELINE.py` | Мутабельные defaults у dataclass; глобальные клиенты внутри конструктора; `_embed` возвращает нули; нет инкрементальности | fixed: зависимости инжектятся; эмбеддинги — `litellm.aembedding` или офлайн `HashingEmbedder`; векторы обновляются только для изменённых файлов (hash), удалённые файлы вычищаются |
 | KN-09 | `RETRIEVAL_STRATEGIES.py` | Фильтр `language == tech_stack.language` (`"typescript@5"`) никогда не совпадает с payload (`"typescript"`); `query_callers` вызывается без `await`; `search_by_symbol` не определён | fixed: область поиска — `manifest.rag_collections` ∩ проиндексированные репо (иначе вся база), язык — буст в реранкере; стратегии coding/planning/fixing — `retrieval/engine.py` |
 | KN-10 | `cli/INGEST_CLI.py` | `reindex` и `delete` — «Not implemented in spec»; источников для `reindex` в манифесте нет | fixed: `autogen-knowledge ingest/reindex/search/callers/stats/delete`; `reindex` читает необязательный `knowledge_sources` манифеста |
-| KN-11 | README §2 | `Dockerfile.knowledge` | open (фаза 6, Ops): в среде разработки нет docker |
+| KN-11 | README §2 | `Dockerfile.knowledge` | fixed (фаза 6): `deploy/docker/Dockerfile.knowledge`; сборка образа — в CI (в среде разработки нет Docker) |
 
 ## 6. Вертикаль SaaS Web (часть 5)
 
@@ -118,13 +118,22 @@
 
 | ID | Где | Проблема | Статус |
 |---|---|---|---|
-| O-01 | `ci_cd/GENERATED_PROJECT_CI.yml` | Шаблон проходит через Jinja: `${{ github.* }}` надо обернуть в `{% raw %}` | open |
-| O-02 | `cost_control/BUDGET_MANAGER.py` | Двойной учёт: резерв + фактическая стоимость | open |
-| O-03 | `hitl/HITL_API.py:109` | `background_tasks.resume_graph(...)` не существует (нужно `add_task`) | open |
-| O-04 | `hitl/HITL_API.py:162` | `Path` не импортирован | open |
-| O-05 | `hitl/HITL_API.py:18` | `from kernel.config import settings` — в реализации `get_settings()` | open |
-| O-06 | `deployment/TERRAFORM/main.tf` | Не пройдёт `terraform validate` | open |
-| O-07 | часть 6 | Нет: `RELEASE_WORKFLOW.yml`, `SECURITY_SCAN.yml`, `LANGSMITH_SETUP.md`, `METRICS.py`, `LOGGING_CONFIG.py`, `CACHE_STRATEGY.md`, `COST_REPORTER.py`, `WEBSOCKET_MANAGER.py`, `UI_COMPONENTS.md`, `APPROVAL_WORKFLOW.py`, `DOCKERCOMPOSE.yml`, `Chart.yaml`, `templates/`, `TERRAFORM/modules/`, `TERRAFORM/environments/`, `SANDBOX_DEPLOYMENT.md`, три скрипта `scripts/` | open |
+| O-01 | `ci_cd/GENERATED_PROJECT_CI.yml` | Шаблон проходит через Jinja: `${{ github.* }}` надо экранировать | fixed (фаза 5): скилл `add_github_actions_ci` экранирует `{{ '{{' }}` |
+| O-02 | `cost_control/BUDGET_MANAGER.py` | Двойной учёт: резерв оценки + фактическая стоимость; `sleep` под lock; смесь `time.time()` и `loop.time()`; `reset_run` пишет `0.0` в int; алерты через `print`; одно глобальное состояние на все run | fixed: `kernel/llm/budget.py` — проверка до вызова по факту без резерва, контекст run через contextvar, ожидание rate limit без lock, алерты в webhook |
+| O-03 | `hitl/HITL_API.py:109` | `background_tasks.resume_graph(...)` не существует | fixed: `kernel/service/runs.py` (`RunManager.resume`, фоновая задача asyncio) |
+| O-04 | `hitl/HITL_API.py:162` | `Path` не импортирован | fixed (файл переписан: `kernel/api/hitl.py`) |
+| O-05 | `hitl/HITL_API.py:18` | `from kernel.config import settings` — в реализации `get_settings()` | fixed |
+| O-06 | `deployment/TERRAFORM/main.tf` | Не пройдёт `terraform validate`: не объявлены `module.rds_sg`, `module.redis_sg`, `module.elasticache_subnet_group` и переменные; однострочные блоки с двумя аргументами (`{ length = 32, special = false }` — ошибка разбора, стр. 125); инлайн-аргументы `aws_s3_bucket`, удалённые в провайдере v4+; нет выхода `module.eks.kubeconfig`; у модуля IRSA нет входа `role_map`; политики `SecretsManagerReadWrite` и `AmazonS3FullAccess` слишком широкие; EKS 1.28 и AMI AL2 сняты с поддержки; секрет `database-url` не содержит URL | fixed: `deploy/terraform/aws/`. `terraform validate/plan` здесь не запускались (реестр недоступен) — в CI (`deploy-lint`) |
+| O-07 | часть 6 | Нет 21 файла (MISSING_FILES #22–42) | fixed агентом, кроме `UI_COMPONENTS.md` (нет UI) — см. MISSING_FILES |
+| O-08 | `hitl/HITL_API.py` | Синхронный `PostgresSaver` вызывается через `aget_tuple`; прерывание читается из несуществующего `checkpoint.metadata["interrupts"]`; граф пересобирается с жёстко заданной вертикалью `saas_web` на каждый resume; формат решения `{"action","data"}` вместо `edited_data` ядра; CORS `*` | fixed: `RunManager` берёт прерывание из `StateSnapshot.tasks`, вертикаль — из состояния run, решение `{"action","comment","edited_data"}`; CORS выключен по умолчанию (`create_app(cors_origins=...)`) |
+| O-09 | `hitl/HITL_API.py` | Путь `POST /runs/{id}/approve` расходится с `07_gateway/api/OPENAPI_SPEC.yaml` (`POST /runs/{id}/interrupt`) | decision: оба пути, основной — из OpenAPI |
+| O-10 | `observability/OTEL_CONFIG.py` | Инструменты создаются при импорте до `setup_otel`; `active_runs` считается на уровне узла; `vertical` берётся из configurable; авто-инструментирование требует пакетов, которых нет в зависимостях | fixed: метрики — `prometheus_client` напрямую (`kernel/observability/metrics.py`, no-op без библиотеки), OTel — только трейсы; `runs_active` считает `RunManager` |
+| O-11 | `observability/GRAFANA_DASHBOARDS.json` | Запросы используют несуществующие метрики (`autogen_gate_status`, `autogen_run_duration_bucket`, `autogen_llm_cost_total`, `autogen_tool_errors_total`, метки `model_name`, `node_name`); «успешность run» считается по гейтам; тип панели `graph` устарел | fixed: `scripts/gen_grafana_dashboard.py` → `deploy/grafana/dashboards/autogen-ops.json`; тест сверяет метрики с кодом |
+| O-12 | `cost_control/MODEL_ROUTER.yaml` | Секция `general` вместо `general_settings`; `strategy: cost-optimized` — не стратегия LiteLLM и не тот ключ (`routing_strategy`); `cache` вне `litellm_settings`; fallbacks не заданы; `${VAR}` вместо `os.environ/VAR`; `master_key` открытым текстом; callback `kernel.cost_control.budget_callback` не существует; модели 2024 года | fixed: `deploy/litellm/config.yaml` + `scripts/check_litellm_config.py` (проверка через `litellm.Router`); бюджет считает ядро |
+| O-13 | `deployment/DOCKERFILE.kernel` | `uv==0.3.0` и `uv.lock`, которого нет; стадия runtime копирует `/app/kernel` из стадии, где есть только `pyproject.toml`; модуля `kernel.main` нет; build-essential в runtime | fixed: `deploy/docker/Dockerfile.kernel` (pip + `requirements-kernel.lock`), `kernel/main.py` (`serve`/`check`/`migrate`) |
+| O-14 | `deployment/HELM_CHART/values.yaml` | Внешние чарты перечислены в `values.yaml` (Helm их игнорирует — место в `Chart.yaml`); `KUZU_PATH` (Kuzu заменён, KN-03); `replicaCount: 3` + HPA при том, что run живут в памяти процесса; переменные окружения не совпадают с `kernel/config.py` | fixed: `deploy/helm/autogen-kernel/` — 1 реплика, env `AUTOGEN_*`, внешние сервисы отдельно |
+| O-15 | реализация | Запущенные run и события WebSocket живут в памяти одного процесса: несколько реплик ядра дадут resume или WebSocket не на том поде; дневной лимит бюджета хранится в SQLite на томе пода | open: нужна общая очередь, шина событий и хранилище usage (Redis/Postgres) — до этого 1 реплика |
+| O-16 | DoD части 6 | Helm в kind, `trivy`, `terraform plan` в среде разработки невозможны (нет Docker, реестры закрыты) | open: вынесены в CI (`kind-smoke`, `image` + Trivy, `deploy-lint`); `terraform plan` требует AWS-аккаунта |
 
 ## 8. Gateway (часть 7)
 
