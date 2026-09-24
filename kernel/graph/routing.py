@@ -9,6 +9,7 @@ LangGraph discards such writes, so all state changes live in the nodes
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal
 
 from ..state import AgentState, InterruptType, VerificationGateStatus
@@ -81,3 +82,16 @@ def route_after_human_review(state: AgentState) -> HumanTarget:
     if target not in HUMAN_TARGETS:
         return "human_review"
     return target  # type: ignore[return-value]
+
+
+# Router of each node's outgoing conditional edge (used to resume after a budget approval).
+ROUTERS: dict[str, Callable[[AgentState], str]] = {
+    "initialize": route_after_initialize,
+    "planner": route_after_planner,
+    "get_next_task": route_get_next_task,
+    "coder": route_after_coder,
+    "verifier": route_after_verifier,
+    "fixer": route_after_fixer,
+    "documenter": route_after_documenter,
+    "packager": route_after_packager,
+}

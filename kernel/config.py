@@ -21,7 +21,11 @@ class KernelSection(BaseModel):
 
 
 class LLMSection(BaseModel):
-    gateway_url: str = "http://litellm:4000"
+    provider: str = "litellm"  # "litellm" (real calls) | "fake" (tests only)
+    # LiteLLM proxy URL. None -> call providers directly (model names like "anthropic/claude-...").
+    gateway_url: str | None = None
+    api_key: SecretStr | None = None  # gateway / provider key (provider keys may also come from their own env vars)
+    max_structured_retries: int = 2  # re-ask on invalid structured output
     default_model: str = "router/coder"
     planner_model: str = "router/planner"
     fixer_model: str = "router/coder"
@@ -30,13 +34,19 @@ class LLMSection(BaseModel):
 
 
 class SandboxSection(BaseModel):
-    provider: str = "local"  # "e2b" | "daytona" | "docker" | "local"
+    provider: str = "local"  # "e2b" | "docker" | "local" (dev/test only, no isolation)
     api_key: SecretStr | None = None
     default_image: str = "ghcr.io/autogen/sandbox-base:latest"
     workspace_path: str = "/workspace"
     cpu: int = 2
     memory_mb: int = 4096
     timeout_sec: int = 300
+    max_concurrent: int = 20  # SandboxManager quota
+    ttl_minutes: int = 60  # idle sandboxes are closed after this
+    docker_network: str = "bridge"  # DockerSandbox only
+    # E2B uses template IDs, not docker images: SandboxSpec.image -> template (fallback: e2b_default_template)
+    e2b_template_map: dict[str, str] = Field(default_factory=dict)
+    e2b_default_template: str | None = None  # None -> E2B base template
 
 
 class DatabaseSection(BaseModel):

@@ -16,6 +16,8 @@ gate_failure        retry | approve | edit(file_changes)   verifier (fix budget 
 gate/infra/node     skip_gate                              get_next_task (task SKIPPED)
 infra_error         retry                                  verifier
 node_error          retry                                  failed node
+budget_exceeded     approve (edited_data.max_budget_usd    router of the node that tripped
+                    and/or max_tokens_per_run)             the limit (ISSUES I-06)
 =================  =====================================  ==============================
 """
 
@@ -40,6 +42,7 @@ from ...state import (
     validate_dag,
 )
 from ..deps import KernelDeps
+from ..routing import ROUTERS
 from ._common import log, sanitize_changes
 
 NODE = "human_review"
@@ -51,7 +54,7 @@ ACTIONS: dict[InterruptType, list[str]] = {
     InterruptType.INFRA_ERROR: ["retry", "skip_gate", "abort"],
     InterruptType.NODE_ERROR: ["retry", "skip_gate", "abort"],
     InterruptType.DESTRUCTIVE_ACTION: ["approve", "abort"],
-    InterruptType.BUDGET_EXCEEDED: ["abort"],
+    InterruptType.BUDGET_EXCEEDED: ["approve", "abort"],  # approve requires a raised limit in edited_data
 }
 
 
@@ -153,6 +156,19 @@ async def human_review_node(state: AgentState, deps: KernelDeps) -> dict[str, An
         update.update(next_after_human="verifier", status=RunStatus.VERIFYING)
     elif itype == InterruptType.NODE_ERROR:
         update["next_after_human"] = state.get("failed_node") or "__end__"
+    elif itype == InterruptType.BUDGET_EXCEEDED:
+        new_budget = edited.get("max_budget_usd")
+        new_tokens = edited.get("max_tokens_per_run")
+        if new_budget is None and new_tokens is None:
+            return reject("approve for budget_exceeded needs edited_data.max_budget_usd or max_tokens_per_run")
+        if new_budget is not None:
+            update["max_budget_usd"] = float(new_budget)
+        if new_tokens is not None:
+            update["metadata"] = {**(state.get("metadata") or {}), "max_tokens_per_run": int(new_tokens)}
+        failed = state.get("failed_node") or ""
+        router = ROUTERS.get(failed)
+        cleared_state: AgentState = {**state, "error": None, "interrupt_type": None}
+        update["next_after_human"] = router(cleared_state) if router else "__end__"
     elif itype == InterruptType.DESTRUCTIVE_ACTION:
         update["next_after_human"] = state.get("failed_node") or "__end__"
     update["logs"] = [log(NODE, f"{itype.value}: {action} -> {update['next_after_human']}")]

@@ -19,12 +19,7 @@ from pathlib import Path, PurePosixPath
 
 from ..protocols import CommandResult, FileStat, SandboxSpec
 from ..state import FileChange
-
-OUTPUT_LIMIT = 200_000
-
-
-class SandboxNotFoundError(KeyError):
-    pass
+from ._common import OUTPUT_LIMIT, SandboxNotFoundError
 
 
 class LocalSandbox:

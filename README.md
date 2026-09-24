@@ -12,9 +12,9 @@
 | Фаза | Раздел ТЗ | Статус |
 |---|---|---|
 | 0 | Раскладка `specs/`, `ISSUES.md`, CI | ✅ |
-| 1 | Kernel: state, протоколы, граф, HITL, чекпойнты | ✅ (LocalSandbox и тестовый LLM; продовые адаптеры — фаза 2) |
-| 2 | Infra: песочницы (E2B/Docker), инструменты, LLM-шлюз | ⏳ следующая |
-| 3 | Skills: движок скиллов, реестр, загрузчик вертикалей | — |
+| 1 | Kernel: state, протоколы, граф, HITL, чекпойнты | ✅ |
+| 2 | Infra: песочницы (E2B/Docker), инструменты, LLM-шлюз, бюджет | ✅ (проверено на моках; с реальными E2B и LLM не запускалось — нет ключей. LSP/RAG-инструменты отложены) |
+| 3 | Skills: движок скиллов, реестр, загрузчик вертикалей | ⏳ следующая |
 | 5 | Вертикаль SaaS Web — до первого собранного проекта | — |
 | 4 | Knowledge (RAG) | — |
 | 6 | Ops: CI/CD, наблюдаемость, бюджет, HITL API, деплой | — |
@@ -37,16 +37,30 @@ kernel/
     nodes/            initialize, planner, get_next_task, coder, verifier, fixer,
                       documenter, packager, human_review
   persistence/        чекпойнтер (InMemory / Postgres) и allowlist сериализации
-  sandbox/local.py    LocalSandbox — только для разработки и тестов, без изоляции
-  tools/registry.py   ToolRegistry
-tests/kernel/         unit + e2e на фейковом LLM
+  llm/                LiteLLMClient (прямые провайдеры или LiteLLM proxy), CostTracker, check_budget
+  sandbox/            E2BSandbox, DockerSandbox, LocalSandbox (только dev/тесты, без изоляции),
+                      SandboxManager (квота, TTL) и фабрика create_sandbox(settings)
+  tools/              filesystem, shell (ShellPolicy), git, ToolRegistry, default_tool_registry
+tests/kernel/         unit + e2e на фейковом LLM; E2B, docker и litellm замоканы
 ```
+
+## Настройка (переменные окружения)
+
+```bash
+AUTOGEN_LLM__API_KEY=...                 # или ключи провайдеров: ANTHROPIC_API_KEY, OPENAI_API_KEY
+AUTOGEN_LLM__GATEWAY_URL=http://litellm:4000   # необязательно: LiteLLM proxy
+AUTOGEN_SANDBOX__PROVIDER=e2b            # e2b | docker | local
+AUTOGEN_SANDBOX__API_KEY=...             # ключ E2B
+AUTOGEN_SANDBOX__E2B_DEFAULT_TEMPLATE=... # шаблон E2B с node/pnpm (иначе базовый)
+```
+
+Лимит расходов на run — `GenerateRequest.max_budget_usd`; при превышении run встаёт на паузу `budget_exceeded`, продолжить — `{"action": "approve", "edited_data": {"max_budget_usd": 5}}`.
 
 ## Разработка
 
 ```bash
 python3.11 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"          # + ".[postgres]" для AsyncPostgresSaver
+pip install -e ".[dev]"          # + ".[postgres]", ".[llm]" (litellm), ".[e2b]"
 
 ruff check . && ruff format --check .
 mypy kernel

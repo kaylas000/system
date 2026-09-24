@@ -17,6 +17,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from ..config import Settings
+from ..llm.cost_tracker import check_budget
 from ..protocols import ILLMClient, ISandbox, IVertical
 from ..state import AgentState, InterruptType, RunStatus
 from . import routing
@@ -56,7 +57,7 @@ def _wrap(name: str, fn: NodeFn, defaults: dict[str, Any], *, catch: bool = True
         if not catch:
             return await fn(state, deps)
         try:
-            return await fn(state, deps)
+            result = await fn(state, deps)
         except GraphBubbleUp:  # interrupts / parent commands must propagate
             raise
         except Exception as exc:
@@ -67,9 +68,29 @@ def _wrap(name: str, fn: NodeFn, defaults: dict[str, Any], *, catch: bool = True
                 "failed_node": name,
                 "logs": [log(name, f"ERROR {type(exc).__name__}: {exc}")],
             }
+        return _enforce_budget(name, state, result, deps)
 
     node.__name__ = f"{name}_node"
     return node
+
+
+def _enforce_budget(name: str, state: AgentState, result: dict[str, Any], deps: KernelDeps) -> dict[str, Any]:
+    """Pause the run (BUDGET_EXCEEDED) after a node if cost/token limits are exceeded."""
+    if result.get("error") or result.get("interrupt_type") or name == "packager":  # own interrupt wins
+        return result
+    usage = result.get("token_usage") or state.get("token_usage")
+    max_tokens = (state.get("metadata") or {}).get("max_tokens_per_run") or deps.settings.llm.max_tokens_per_run
+    reason = check_budget(usage, state.get("max_budget_usd"), max_tokens)
+    if reason is None:
+        return result
+    return {
+        **result,
+        "error": reason,
+        "interrupt_type": InterruptType.BUDGET_EXCEEDED,
+        "status": RunStatus.NEEDS_HUMAN_INPUT,
+        "failed_node": name,
+        "logs": [*result.get("logs", []), log(name, reason)],
+    }
 
 
 def build_graph(
