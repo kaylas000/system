@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1.7
+# Kernel service image (written by the agent from specs/06_ops/deployment/DOCKERFILE.kernel).
+# Spec defects fixed (ISSUES O-xx): uv 0.3.0 + missing uv.lock, runtime stage copied /app/kernel from a
+# stage that only had pyproject.toml, `kernel.main` did not exist, build tools shipped in runtime.
+#
+#   docker build -f deploy/docker/Dockerfile.kernel -t autogen-kernel .
+#   docker run -p 8000:8000 --env-file .env autogen-kernel
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+
+# --- builder: wheel + dependencies in a venv -------------------------------------------------
+FROM ${PYTHON_IMAGE} AS builder
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /src
+# dependency layer: pinned lock (regenerate: scripts/lock_requirements.sh), invalidated only by the lock
+COPY deploy/docker/requirements-kernel.lock /tmp/requirements.lock
+RUN pip install --no-deps -r /tmp/requirements.lock
+COPY pyproject.toml README.md ./
+COPY kernel ./kernel
+COPY verticals ./verticals
+RUN pip install --no-deps . && python -m compileall -q /opt/venv/lib
+
+# --- runtime ---------------------------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS runtime
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    AUTOGEN_KERNEL__VERTICALS_DIR=/app/verticals \
+    AUTOGEN_BUDGET__USAGE_DB_PATH=/data/llm_usage.sqlite \
+    AUTOGEN_ARTIFACTS__LOCAL_DIR=/data/artifacts \
+    AUTOGEN_VECTOR_DB__QDRANT_PATH=/data/qdrant
+# git: GitTool / packager (generated project history)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r -g 10001 autogen \
+    && useradd -r -u 10001 -g autogen -d /app -s /usr/sbin/nologin autogen \
+    && mkdir -p /app /data && chown autogen:autogen /app /data
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=autogen:autogen verticals /app/verticals
+WORKDIR /app
+USER 10001:10001
+VOLUME ["/data"]
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+CMD ["python", "-m", "kernel.main", "serve", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1.7
+# Knowledge ingestion CLI image (ISSUES KN-11; written by the agent).
+#
+#   docker build -f deploy/docker/Dockerfile.knowledge -t autogen-knowledge .
+#   docker run --rm -v "$PWD/repo:/repo:ro" -e AUTOGEN_VECTOR_DB__QDRANT_URL=http://qdrant:6333 \
+#       autogen-knowledge ingest /repo --name my-repo
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+
+FROM ${PYTHON_IMAGE} AS builder
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /src
+# dependency layer: pinned lock (regenerate: scripts/lock_requirements.sh), invalidated only by the lock
+COPY deploy/docker/requirements-knowledge.lock /tmp/requirements.lock
+RUN pip install --no-deps -r /tmp/requirements.lock
+COPY pyproject.toml README.md ./
+COPY kernel ./kernel
+COPY verticals ./verticals
+RUN pip install --no-deps . && python -m compileall -q /opt/venv/lib
+
+FROM ${PYTHON_IMAGE} AS runtime
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PATH="/opt/venv/bin:$PATH" \
+    AUTOGEN_VECTOR_DB__QDRANT_PATH=/data/qdrant
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r -g 10001 autogen \
+    && useradd -r -u 10001 -g autogen -d /data -s /usr/sbin/nologin autogen \
+    && mkdir -p /data && chown autogen:autogen /data
+COPY --from=builder /opt/venv /opt/venv
+WORKDIR /data
+USER 10001:10001
+VOLUME ["/data"]
+# one-shot CLI, not a service
+HEALTHCHECK NONE
+ENTRYPOINT ["autogen-knowledge"]
+CMD ["--help"]

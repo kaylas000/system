@@ -1,0 +1,5 @@
+bucket         = "autogen-terraform-state"
+key            = "prod/infra/terraform.tfstate"
+region         = "us-east-1"
+encrypt        = true
+use_lockfile   = true

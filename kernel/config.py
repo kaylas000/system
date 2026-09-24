@@ -112,7 +112,9 @@ class ArtifactsSection(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="AUTOGEN_", env_nested_delimiter="__", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="AUTOGEN_", env_nested_delimiter="__", extra="ignore", env_ignore_empty=True
+    )
 
     kernel: KernelSection = Field(default_factory=KernelSection)
     llm: LLMSection = Field(default_factory=LLMSection)

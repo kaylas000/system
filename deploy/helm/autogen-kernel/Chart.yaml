@@ -1,0 +1,8 @@
+apiVersion: v2
+name: autogen-kernel
+description: AutoGen platform kernel API (LangGraph runs, HITL API, metrics). Written by the agent.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+# Postgres / Redis / Qdrant / LiteLLM are external (managed services or their own charts);
+# the spec listed them as `dependencies:` inside values.yaml, which Helm ignores (ISSUES O-xx).

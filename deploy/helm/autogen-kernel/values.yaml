@@ -1,0 +1,110 @@
+# Written by the agent from specs/06_ops/deployment/HELM_CHART/values.yaml (ISSUES O-xx for changes).
+
+# Runs and the WebSocket event bus live in the pod's memory; checkpoints are in Postgres.
+# Keep 1 replica until the run queue / event bus are moved to Redis (ISSUES O-xx) — with more
+# replicas a human decision or WebSocket may hit a pod that does not execute the run.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/kaylas000/autogen-kernel
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}    # e.g. eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/autogen-kernel-prod
+
+podAnnotations: {}
+podLabels: {}
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"   # WebSocket /ws/runs/{id}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  hosts:
+    - host: autogen.example.com
+      paths: ["/"]
+  tls: []
+  #  - secretName: autogen-tls
+  #    hosts: [autogen.example.com]
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+# Only meaningful after the run queue is shared (see replicaCount).
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# Non-secret settings -> ConfigMap (env AUTOGEN_*; see kernel/config.py)
+config:
+  AUTOGEN_LLM__GATEWAY_URL: http://litellm:4000
+  AUTOGEN_VECTOR_DB__QDRANT_URL: http://qdrant:6333
+  AUTOGEN_SANDBOX__PROVIDER: e2b
+  AUTOGEN_KERNEL__MAX_CONCURRENT_RUNS: "20"
+  AUTOGEN_BUDGET__MAX_COST_USD_PER_DAY: "50"
+  AUTOGEN_BUDGET__MAX_COST_USD_PER_RUN: "5"
+  AUTOGEN_OBSERVABILITY__OTEL_ENDPOINT: http://otel-collector:4317
+
+# Secrets: reference an existing Secret (recommended: External Secrets / Secrets Manager CSI).
+# Keys expected in it (all optional except the DSN): AUTOGEN_DATABASE__POSTGRES_DSN, AUTOGEN_LLM__API_KEY,
+# AUTOGEN_SANDBOX__API_KEY, AUTOGEN_OBSERVABILITY__LANGSMITH_API_KEY, AUTOGEN_BUDGET__ALERT_WEBHOOK_URL
+existingSecret: autogen-secrets
+# For quick tests only (rendered into a Secret in plain values — do not use in production):
+secrets: {}
+
+extraEnv: []
+
+# /data: LLM usage store (daily budget), artifacts, embedded Qdrant fallback
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+pdb:
+  enabled: false     # enable with replicaCount > 1
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingressNamespaceLabel: ingress-nginx      # kubernetes.io/metadata.name of the ingress controller namespace
+  prometheusNamespaceLabel: monitoring
+
+serviceMonitor:
+  enabled: false     # requires the Prometheus Operator CRDs
+  interval: 30s
+  labels: {}

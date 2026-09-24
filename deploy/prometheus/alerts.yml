@@ -1,0 +1,33 @@
+groups:
+  - name: autogen
+    rules:
+      - alert: AutogenRunFailureRateHigh
+        expr: |
+          sum(increase(autogen_runs_total{status="failed"}[30m]))
+            / clamp_min(sum(increase(autogen_runs_total[30m])), 1) > 0.3
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 30% of runs failed in the last 30 minutes"
+      - alert: AutogenLLMErrorRateHigh
+        expr: sum(rate(autogen_llm_requests_total{status="error"}[5m])) / clamp_min(sum(rate(autogen_llm_requests_total[5m])), 1e-9) > 0.2
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "LLM error rate above 20%"
+      - alert: AutogenLLMSpendHigh
+        expr: sum(increase(autogen_llm_cost_usd_total[1h])) > 20
+        labels: {severity: warning}
+        annotations:
+          summary: "LLM spend above $20 in the last hour"
+      - alert: AutogenBudgetDailyLimitHit
+        expr: increase(autogen_budget_exceeded_total{scope="day"}[10m]) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "Daily LLM budget reached — new LLM calls are refused"
+      - alert: AutogenRunsQueued
+        expr: autogen_queue_depth > 5
+        for: 10m
+        labels: {severity: info}
+        annotations:
+          summary: "Runs are waiting for a free slot (kernel.max_concurrent_runs)"
