@@ -69,7 +69,9 @@ async def test_happy_path_with_fix_loop(tmp_path: Path, settings: Settings) -> N
     assert h.vertical.completed == ["t1", "t2"]
     assert h.vertical.finalized
     assert result["metadata"]["readme"] == "generated"
-    assert [r.status.value for r in result["verification_history"]] == ["failed", "passed", "passed"]
+    # t1 failed + fixed, t2 passed, then the project-level (final) verification in the packager
+    assert [r.status.value for r in result["verification_history"]] == ["failed", "passed", "passed", "passed"]
+    assert result["final_artifact"].quality_report["final_verification_passed"] is True
     assert set(result["project_files"]) == {"src/a.txt", "src/b.txt"}
     # models routed per settings
     assert [c["model"] for c in h.llm.calls] == ["router/planner", "router/coder", "router/coder", "router/coder"]

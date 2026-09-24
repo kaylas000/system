@@ -9,7 +9,9 @@ edits are out of scope until the LSP tool exists (ISSUES SK-09).
 
 from __future__ import annotations
 
+import json
 import re
+from typing import Any
 
 from ..protocols import CommandResult
 from ..state import FileChange
@@ -68,3 +70,54 @@ def insert_after_marker(content: str, marker: str, text: str) -> str:
 async def update_file(ctx: HookContext, path: str, new_content: str) -> FileChange:
     """FileChange for an edited existing file (returned from ``post_render``)."""
     return FileChange(path=path, content=new_content, action="update")
+
+
+def _env_keys(content: str) -> set[str]:
+    keys: set[str] = set()
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            keys.add(stripped.split("=", 1)[0].removeprefix("export ").strip())
+    return keys
+
+
+def merge_env(content: str, variables: dict[str, str], comment: str | None = None) -> str:
+    """Append ``KEY=value`` lines for keys not yet present (idempotent). Values are written as given."""
+    present = _env_keys(content)
+    missing = {k: v for k, v in variables.items() if k not in present}
+    if not missing:
+        return content
+    block = ([f"# {comment}"] if comment else []) + [f"{k}={v}" for k, v in missing.items()]
+    base = content.rstrip("\n")
+    return (base + "\n\n" if base else "") + "\n".join(block) + "\n"
+
+
+async def append_env_example(
+    ctx: HookContext, variables: dict[str, str], comment: str | None = None, path: str = ".env.example"
+) -> FileChange | None:
+    """``FileChange`` adding missing variables to ``.env.example`` (``None`` if nothing to add)."""
+    current = await read_file(ctx, path)
+    updated = merge_env(current or "", variables, comment)
+    if current is not None and updated == current:
+        return None
+    return FileChange(path=path, content=updated, action="update" if current is not None else "create")
+
+
+def deep_merge(base: Any, patch: Any) -> Any:
+    """Recursive dict merge; ``patch`` wins for non-dict values."""
+    if isinstance(base, dict) and isinstance(patch, dict):
+        out = dict(base)
+        for k, v in patch.items():
+            out[k] = deep_merge(base.get(k), v) if k in base else v
+        return out
+    return patch
+
+
+async def merge_json_file(ctx: HookContext, path: str, patch: dict[str, Any]) -> FileChange:
+    """``FileChange`` with ``patch`` deep-merged into the JSON file at ``path`` (e.g. package.json scripts)."""
+    current = await read_file(ctx, path)
+    data = json.loads(current) if current else {}
+    merged = deep_merge(data, patch)
+    return FileChange(
+        path=path, content=json.dumps(merged, indent=2) + "\n", action="update" if current is not None else "create"
+    )

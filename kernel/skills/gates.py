@@ -37,11 +37,15 @@ class GateConfig(BaseModel):
     severity: str = "error"  # error -> FAILED blocks; warning/info -> reported, does not block
     tags: list[str] = Field(default_factory=list)
     workdir: str = "."  # relative to the workspace
+    # exclusive gates run alone, after the parallel ones (e.g. `next build` rewrites .next/
+    # while `tsc` reads .next/types)
+    exclusive: bool = False
 
 
 class CommandGate:
     def __init__(self, config: GateConfig, parser: Parser | None = None) -> None:
         self.config = config
+        self.exclusive = config.exclusive
         self.id = config.id
         self.name = config.name
         self.description = config.description

@@ -266,3 +266,52 @@ async def test_generic_vertical_e2e(tmp_path: Path, settings: Settings) -> None:
     fixer_user = llm.calls[2]["messages"][1].content
     assert "src/extra.txt" in fixer_user  # parser -> files_to_fix -> fixer sees the file
     assert any("docs written: README.md" in line for line in result["logs"])
+
+
+async def test_exclusive_gates_run_after_parallel_ones() -> None:
+    import asyncio
+
+    from kernel.graph.nodes.verifier import run_gates
+    from kernel.state import VerificationGateResult, VerificationGateStatus
+
+    order: list[str] = []
+
+    class Gate:
+        def __init__(self, gid: str, exclusive: bool, delay: float) -> None:
+            self.id = self.name = gid
+            self.description = ""
+            self.exclusive = exclusive
+            self.delay = delay
+
+        async def execute(
+            self, sandbox: object, sandbox_id: str, workspace: str, state: object
+        ) -> VerificationGateResult:
+            order.append(f"start:{self.id}")
+            await asyncio.sleep(self.delay)
+            order.append(f"end:{self.id}")
+            return VerificationGateResult(
+                gate_id=self.id,
+                name=self.id,
+                status=VerificationGateStatus.PASSED,
+                command="",
+                exit_code=0,
+                duration_ms=0,
+            )
+
+    gates = [Gate("build", True, 0), Gate("lint", False, 0.02), Gate("tsc", False, 0.01)]
+    from types import SimpleNamespace
+
+    results = await run_gates(gates, SimpleNamespace(sandbox=None), "sb", "/workspace", {})  # type: ignore[arg-type]
+    assert [r.gate_id for r in results] == ["lint", "tsc", "build"]
+    assert order.index("start:build") > max(order.index("end:lint"), order.index("end:tsc"))
+
+
+def test_mentioned_paths() -> None:
+    from kernel.graph.nodes._common import mentioned_paths
+
+    text = "Update src/app/dashboard/page.tsx and ./prisma/schema.prisma; see src/app/(auth)/login/page.tsx."
+    assert mentioned_paths(text) == [
+        "src/app/dashboard/page.tsx",
+        "prisma/schema.prisma",
+        "src/app/(auth)/login/page.tsx",
+    ]

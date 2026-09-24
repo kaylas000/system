@@ -1,0 +1,26 @@
+import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+
+const prisma = new PrismaClient();
+
+async function main() {
+  const email = process.env.SEED_ADMIN_EMAIL ?? {{ admin_email | to_json }};
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password) {
+    console.warn("SEED_ADMIN_PASSWORD is not set - skipping admin user");
+    return;
+  }
+  await prisma.user.upsert({
+    where: { email },
+    update: {},
+    create: { email, name: "Admin", role: "ADMIN", passwordHash: await bcrypt.hash(password, 12) },
+  });
+  console.warn(`seeded admin user ${email}`);
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(() => void prisma.$disconnect());

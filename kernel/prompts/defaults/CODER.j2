@@ -16,9 +16,20 @@ PROJECT SPEC (excerpt)
 PROJECT STRUCTURE
 {{ file_structure | to_json }}
 {% endif %}
-{% if project_files %}
+{% if file_tree %}
+FILES IN THE PROJECT
+{% for path in file_tree %}- {{ path }}
+{% endfor %}
+{% elif project_files %}
 FILES IN THE PROJECT
 {% for path in project_files | list | sort %}- {{ path }}
+{% endfor %}
+{% endif %}
+{% if open_files %}
+CURRENT CONTENT OF RELEVANT FILES
+{% for f in open_files %}
+--- {{ f.path }} ---
+{{ f.content }}
 {% endfor %}
 {% endif %}
 {% if retrieved_context %}

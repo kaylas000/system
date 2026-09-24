@@ -1,0 +1,42 @@
+# Written from specs/03_skills/examples/init_nextjs_app_router + specs/addenda (A-01, A-16), versions verified with `npm view` (2026-09)
+id: init_nextjs_app_router
+name: "Initialize Next.js 14 App Router Project"
+version: "2.0.0"
+description: |
+  Creates a production-ready Next.js 14 project: App Router, TypeScript (strict), Tailwind CSS with the
+  shadcn/ui theme, ESLint, Prettier, Vitest. package.json already contains the whole SaaS stack
+  (tRPC 11, Prisma 5, NextAuth v5, Zod) so later skills only add files. Installs dependencies.
+category: scaffold
+tags: [nextjs, react, typescript, tailwind, scaffold, starter]
+depends_on: []
+provides: [nextjs_app_router, typescript, tailwind, eslint, prettier, vitest]
+inputs:
+  type: object
+  required: [project_name]
+  properties:
+    project_name:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9-]*$'
+      description: "npm package name (kebab-case)"
+    title:
+      type: string
+      description: "Human readable app title (default: derived from project_name)"
+    description:
+      type: string
+      default: "Generated SaaS application"
+    package_manager:
+      type: string
+      enum: [pnpm, npm]
+      default: "pnpm"
+template_dir: templates
+entrypoint: hooks.py
+post_scripts:
+  - "{% if package_manager == 'pnpm' %}corepack enable pnpm >/dev/null 2>&1 || npm i -g pnpm@9 >/dev/null 2>&1; pnpm install --no-frozen-lockfile{% else %}npm install --no-audit --no-fund{% endif %}"
+validation:
+  - "test -f package.json && test -f tsconfig.json && test -f tailwind.config.ts"
+outputs:
+  nextjs_version: "14.2.35"
+  package_manager: "{{ package_manager }}"
+  router_type: "app_router"
+  project_name: "{{ project_name }}"
+compatible_verticals: ["saas_web"]

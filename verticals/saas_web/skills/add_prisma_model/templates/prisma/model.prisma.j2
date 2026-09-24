@@ -1,0 +1,24 @@
+{% for e in enums %}
+enum {{ e.name }} {
+{% for v in e["values"] %}
+  {{ v }}
+{% endfor %}
+}
+
+{% endfor %}
+model {{ model_name }} {
+  id        String   @id @default(cuid())
+{% for f in fields %}
+  {{ f.name }} {{ f.enum if f.type == "Enum" else f.type }}{{ "?" if f.optional else "" }}{{ " @unique" if f.unique else "" }}{{ (" @default(" ~ f.default ~ ")") if f.default is defined and f.default != "" else "" }}{{ " @db.Text" if f.text and f.type == "String" else "" }}
+{% endfor %}
+{% if owned_by_user %}
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+{% endif %}
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+{% if owned_by_user %}
+
+  @@index([userId])
+{% endif %}
+}

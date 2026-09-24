@@ -1,0 +1,30 @@
+# Written from the catalog entry + specs/addenda (A-01: seed without Role import, hooks fixed)
+id: init_prisma_postgres
+name: "Initialize Prisma with PostgreSQL"
+version: "2.0.0"
+description: |
+  Adds Prisma 5 with PostgreSQL: schema with the Auth.js models (User, Account, Session,
+  VerificationToken) plus password hash and role, a singleton PrismaClient (src/server/db.ts),
+  a seed script and DATABASE_URL in .env.example. Runs `prisma generate`.
+category: scaffold
+tags: [prisma, postgres, database, orm, scaffold]
+depends_on: [init_nextjs_app_router]
+provides: [prisma, database, user_model]
+inputs:
+  type: object
+  properties:
+    admin_email:
+      type: string
+      default: "admin@example.com"
+      description: "E-mail of the admin user created by the seed script"
+template_dir: templates
+entrypoint: hooks.py
+post_scripts:
+  - "npx --no-install prisma generate"
+validation:
+  - "npx --no-install prisma validate"
+outputs:
+  schema_path: "prisma/schema.prisma"
+  db_client_import: "@/server/db"
+  user_model: "User"
+compatible_verticals: ["saas_web"]

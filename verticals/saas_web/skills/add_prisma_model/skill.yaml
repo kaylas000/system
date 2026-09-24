@@ -1,0 +1,62 @@
+# Written from specs/03_skills/examples/add_prisma_model with fixes (SK-10; no `migrate dev`, it needs a live DB)
+id: add_prisma_model
+name: "Add Prisma Model"
+version: "2.0.0"
+description: |
+  Adds a model (and optional enums) to prisma/schema.prisma: cuid id, the given fields,
+  createdAt/updatedAt and - if owned_by_user - a required owner relation to User
+  (userId + back-relation on User). Formats the schema and regenerates the Prisma client.
+  Apply to the database with `npm run db:push` or `npm run db:migrate`.
+category: feature
+tags: [prisma, database, model, backend]
+depends_on: [init_prisma_postgres]
+provides: [prisma_model]
+inputs:
+  type: object
+  required: [model_name, fields]
+  properties:
+    model_name:
+      type: string
+      pattern: '^[A-Z][a-zA-Z0-9]*$'
+      description: "PascalCase model name, e.g. Todo, BlogPost"
+    owned_by_user:
+      type: boolean
+      default: true
+      description: "Add userId + relation to User (rows belong to the signed-in user)"
+    fields:
+      type: array
+      minItems: 1
+      description: "Model fields (id, createdAt, updatedAt, userId are added automatically)"
+      items:
+        type: object
+        required: [name, type]
+        additionalProperties: false
+        properties:
+          name: {type: string, pattern: '^[a-z][a-zA-Z0-9]*$'}
+          type: {type: string, enum: [String, Int, Float, Decimal, Boolean, DateTime, Json, Enum]}
+          optional: {type: boolean, default: false}
+          unique: {type: boolean, default: false}
+          default: {type: string, description: "Prisma default expression, e.g. false, 0, now(), \"draft\", TODO"}
+          enum: {type: string, description: "Enum name when type is Enum"}
+          text: {type: boolean, default: false, description: "String stored as @db.Text"}
+    enums:
+      type: array
+      default: []
+      items:
+        type: object
+        required: [name, values]
+        properties:
+          name: {type: string, pattern: '^[A-Z][a-zA-Z0-9]*$'}
+          values: {type: array, minItems: 1, items: {type: string, pattern: '^[A-Z][A-Z0-9_]*$'}}
+template_dir: templates
+entrypoint: hooks.py
+post_scripts:
+  - "npx --no-install prisma format"
+  - "npx --no-install prisma generate"
+validation:
+  - "npx --no-install prisma validate"
+  - "grep -q '^model {{ model_name }} {' prisma/schema.prisma"
+outputs:
+  model_name: "{{ model_name }}"
+  owned_by_user: "{{ owned_by_user }}"
+compatible_verticals: ["saas_web"]

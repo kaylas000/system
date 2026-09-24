@@ -1,0 +1,76 @@
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
+{% if enum_imports %}
+import { {{ enum_imports | join(", ") }} } from "@prisma/client";
+{% endif %}
+import { {{ procedure_imports | join(", ") }} } from "@/server/api/trpc";
+
+export const {{ router_name }}CreateInput = z.object({
+{% for f in zod_fields %}
+  {{ f.name }}: {{ f.zod }},
+{% endfor %}
+});
+
+export const {{ router_name }}UpdateInput = {{ router_name }}CreateInput.partial().extend({ id: z.string().min(1) });
+
+export const {{ router_name }}Router = createTRPCRouter({
+  list: {{ read_proc }}
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(100).default(20),
+          cursor: z.string().nullish(),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const limit = input?.limit ?? 20;
+      const items = await ctx.db.{{ delegate }}.findMany({
+{% if owned %}
+        where: { userId: ctx.session.user.id },
+{% endif %}
+        take: limit + 1,
+        cursor: input?.cursor ? { id: input.cursor } : undefined,
+        orderBy: {{ order_by }},
+      });
+      let nextCursor: string | undefined;
+      if (items.length > limit) {
+        nextCursor = items.pop()?.id;
+      }
+      return { items, nextCursor };
+    }),
+
+  getById: {{ read_proc }}.input(z.object({ id: z.string().min(1) })).query(async ({ ctx, input }) => {
+    const item = await ctx.db.{{ delegate }}.findFirst({
+      where: { id: input.id{% if owned %}, userId: ctx.session.user.id{% endif %} },
+    });
+    if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "{{ model_name }} not found" });
+    return item;
+  }),
+
+  create: {{ write_proc }}.input({{ router_name }}CreateInput).mutation(async ({ ctx, input }) => {
+    return ctx.db.{{ delegate }}.create({
+      data: { ...input{% if owned %}, userId: ctx.session.user.id{% endif %} },
+    });
+  }),
+
+  update: {{ write_proc }}.input({{ router_name }}UpdateInput).mutation(async ({ ctx, input }) => {
+    const { id, ...data } = input;
+    const existing = await ctx.db.{{ delegate }}.findFirst({
+      where: { id{% if owned %}, userId: ctx.session.user.id{% endif %} },
+      select: { id: true },
+    });
+    if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "{{ model_name }} not found" });
+    return ctx.db.{{ delegate }}.update({ where: { id }, data });
+  }),
+
+  delete: {{ write_proc }}.input(z.object({ id: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    const existing = await ctx.db.{{ delegate }}.findFirst({
+      where: { id: input.id{% if owned %}, userId: ctx.session.user.id{% endif %} },
+      select: { id: true },
+    });
+    if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "{{ model_name }} not found" });
+    await ctx.db.{{ delegate }}.delete({ where: { id: input.id } });
+    return { id: input.id };
+  }),
+});

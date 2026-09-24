@@ -42,6 +42,18 @@ async def _run_gate(
         )
 
 
+async def run_gates(
+    gates: list[IVerificationGate], deps: KernelDeps, sandbox_id: str, workspace: str, state: AgentState
+) -> list[VerificationGateResult]:
+    """Run gates in parallel; gates with ``exclusive = True`` run afterwards, one at a time."""
+    parallel = [g for g in gates if not getattr(g, "exclusive", False)]
+    exclusive = [g for g in gates if getattr(g, "exclusive", False)]
+    results = list(await asyncio.gather(*(_run_gate(g, deps, sandbox_id, workspace, state) for g in parallel)))
+    for gate in exclusive:
+        results.append(await _run_gate(gate, deps, sandbox_id, workspace, state))
+    return results
+
+
 async def verifier_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
     task = get_current_task(state)
     if task is None:
@@ -50,7 +62,7 @@ async def verifier_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
     gates = deps.vertical.get_verification_gates(state, task)
     sandbox_id = state["sandbox_id"]
     workspace = state.get("workspace_path", deps.settings.sandbox.workspace_path)
-    results = list(await asyncio.gather(*(_run_gate(g, deps, sandbox_id, workspace, state) for g in gates)))
+    results = await run_gates(gates, deps, sandbox_id, workspace, state)
 
     base: dict[str, Any] = {
         "current_gate_results": results,

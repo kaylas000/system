@@ -1,0 +1,35 @@
+# Written from specs/addenda v2 §I/§J with fixes A-03 (auth() instead of getServerSession),
+# A-08 (@auth/prisma-adapter), A-09 (provider imports), A-10 (edge-safe auth.config for middleware)
+id: add_nextauth_credentials
+name: "Add Auth.js (NextAuth v5): credentials + optional GitHub"
+version: "2.0.0"
+description: |
+  Auth.js v5 with e-mail/password (bcrypt) and optional GitHub OAuth, JWT sessions, Prisma adapter,
+  edge-safe middleware protecting /dashboard, login & register pages, `auth.register` tRPC procedure,
+  role in the session, and the real session accessor for the tRPC context.
+category: feature
+tags: [auth, nextauth, security, trpc, feature]
+depends_on: [init_prisma_postgres, init_trpc_setup]
+provides: [auth, session, protected_routes]
+inputs:
+  type: object
+  properties:
+    github_oauth:
+      type: boolean
+      default: false
+      description: "Also enable GitHub OAuth (needs AUTH_GITHUB_ID / AUTH_GITHUB_SECRET)"
+    protected_paths:
+      type: array
+      items: {type: string, pattern: '^/'}
+      default: ["/dashboard"]
+template_dir: templates
+entrypoint: hooks.py
+post_scripts:
+  - "npx --no-install prettier --write --log-level warn src/components/auth src/server/api/root.ts"
+validation:
+  - "test -f src/server/auth/index.ts && test -f src/middleware.ts"
+outputs:
+  auth_import: "@/server/auth"
+  login_path: "/login"
+  protected_paths: "{{ protected_paths | join(',') }}"
+compatible_verticals: ["saas_web"]

@@ -1,0 +1,99 @@
+# SaaS Web vertical manifest - from specs/05_vertical_saas_web/MANIFEST.yaml, corrected (ISSUES V-xx):
+# only skills that exist are listed; stack versions match the templates; prompts that the spec
+# does not provide (FIXER, DOCUMENTER, REVIEWER) come from kernel defaults.
+id: saas_web
+name: "Modern SaaS Web Application"
+version: "2.1.0"
+description: |
+  Production-grade SaaS starter: Next.js 14 (App Router), React 18, TypeScript (strict), Tailwind, shadcn/ui.
+  Backend: tRPC 11, Prisma 5 (PostgreSQL), Auth.js v5 (credentials + OAuth).
+  Delivery: Dockerfile (standalone), docker-compose, GitHub Actions CI. Quality: ESLint, tsc, Vitest.
+
+runtime:
+  docker_image: "ghcr.io/kaylas000/sandbox-saas-web:2.1.0"   # built from sandbox/Dockerfile (A-17)
+  cpu: 2
+  memory_mb: 4096
+  env_vars:
+    NODE_ENV: "development"
+    NEXT_TELEMETRY_DISABLED: "1"
+    CI: "1"
+  ports: [3000]
+
+tech_stack:
+  language: "typescript@5"
+  framework: "nextjs@14.2"
+  runtime: "node@20"
+  package_manager: "pnpm@9"
+  ui: "tailwind@3.4,shadcn-ui"
+  orm: "prisma@5"
+  api: "trpc@11"
+  auth: "next-auth@5 (Auth.js)"
+  db: "postgresql@16"
+  validation: "zod@3"
+  testing: "vitest@1"
+  linting: "eslint@8 (next/core-web-vitals)"
+  ci: "github-actions"
+
+skills_dir: "skills"
+key_skills:
+  - init_nextjs_app_router
+  - init_prisma_postgres
+  - init_trpc_setup
+  - add_nextauth_credentials
+  - add_shadcn_ui
+  - add_prisma_model
+  - add_trpc_router
+  - add_crud_page
+  - add_dockerfile_prod
+  - add_github_actions_ci
+
+planner:
+  max_tasks: 25
+  task_granularity: "feature"
+  default_constraints:
+    - "Follow Next.js 14 App Router conventions (Server Components by default, 'use client' only when needed)"
+    - "Use tRPC for all client-server communication (no raw fetch to own API)"
+    - "Database access ONLY via Prisma (ctx.db) inside tRPC procedures or server components"
+    - "UI via shadcn/ui components + Tailwind. No custom CSS unless necessary."
+    - "Auth via Auth.js v5 (`auth()` from @/server/auth). Protect routes via middleware."
+    - "Strict TypeScript: no 'any', strict null checks, noUncheckedIndexedAccess."
+    - "All mutations validated by Zod schemas in tRPC procedures."
+
+coder:
+  # always shown to the LLM coder (if they exist) so freeform tasks integrate with generated code
+  context_files:
+    - package.json
+    - prisma/schema.prisma
+    - src/server/api/root.ts
+    - src/server/api/trpc.ts
+    - src/app/layout.tsx
+    - src/app/dashboard/page.tsx
+
+verification:
+  gates_config: "verification/GATES.yaml"
+
+prompts:
+  planner: "prompts/PLANNER.j2"
+  coder: "prompts/CODER.j2"
+
+project_structure:
+  "src/app": "Next.js App Router pages, layouts, route handlers (api/trpc, api/auth, api/health)"
+  "src/app/dashboard": "Authenticated area (protected by middleware)"
+  "src/components/ui": "shadcn/ui components"
+  "src/components": "Feature components (client components use `api` from @/trpc/react)"
+  "src/server/api/routers": "tRPC routers; registered in src/server/api/root.ts"
+  "src/server/api/trpc.ts": "tRPC init: createTRPCRouter, publicProcedure, protectedProcedure, adminProcedure"
+  "src/server/auth": "Auth.js config (config.ts is edge-safe, index.ts exports auth/signIn/signOut/handlers)"
+  "src/server/db.ts": "Prisma client singleton `db`"
+  "src/trpc": "react.tsx (client hooks `api`), server.ts (RSC caller `api`)"
+  "prisma/schema.prisma": "Database schema (User, Account, Session, VerificationToken + app models)"
+
+rag_collections:
+  - "nextjs_docs_v14"
+  - "trpc_v11_patterns"
+  - "prisma_orm_v5"
+  - "nextauth_v5"
+  - "shadcn_ui_components"
+  - "security_patterns_owasp"
+
+compatible_kernels: [">=1.0.0"]

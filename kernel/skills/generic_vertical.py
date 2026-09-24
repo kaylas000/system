@@ -143,6 +143,11 @@ class GenericVertical:
             "retrieved_context": (state.get("metadata") or {}).get("rag_context", ""),
         }
 
+    def context_files(self, state: AgentState, task: Task) -> list[str]:
+        """Files whose content the coder always sees (manifest ``coder.context_files``)."""
+        coder_cfg = getattr(self._manifest, "coder", None) or {}
+        return [str(p) for p in coder_cfg.get("context_files", [])]
+
     def get_planner_prompt(self, state: AgentState) -> str:
         return self.prompts.render_for_state("PLANNER.j2", state, **self.prompt_context(state))
 

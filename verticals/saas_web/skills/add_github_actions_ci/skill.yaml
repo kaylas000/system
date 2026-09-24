@@ -1,0 +1,22 @@
+# Written by the agent from the catalog entry (the spec gives no files for this skill)
+id: add_github_actions_ci
+name: "Add GitHub Actions CI"
+version: "1.0.0"
+description: |
+  .github/workflows/ci.yml: install, prisma generate, lint, typecheck, unit tests, next build
+  and a docker build (no push) - the `docker_build` gate that cannot run in the sandbox (A-14).
+category: infra
+tags: [ci, github, infra]
+depends_on: [init_nextjs_app_router]
+provides: [ci]
+inputs:
+  type: object
+  properties:
+    node_version: {type: string, default: "20"}
+template_dir: templates
+entrypoint: hooks.py
+validation:
+  - "test -f .github/workflows/ci.yml"
+outputs:
+  workflow: ".github/workflows/ci.yml"
+compatible_verticals: ["saas_web"]

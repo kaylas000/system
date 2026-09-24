@@ -1,0 +1,22 @@
+# From specs/addenda v2 §K with fixes A-11 (valid components.json) and A-13 (no `shadcn-ui`/`bunx` CLI:
+# the CLI needs network + interactive prompts; components are rendered from templates, deps are in package.json)
+id: add_shadcn_ui
+name: "Add shadcn/ui base components"
+version: "2.0.0"
+description: |
+  shadcn/ui setup: components.json and the base components Button, Input, Label, Card, Badge
+  (Radix Slot/Label + class-variance-authority + cn). Theme variables are already in globals.css.
+category: config
+tags: [ui, shadcn, tailwind, components, config]
+depends_on: [init_nextjs_app_router]
+provides: [shadcn_ui, ui_components]
+inputs:
+  type: object
+  properties: {}
+template_dir: templates
+validation:
+  - "test -f components.json && test -f src/components/ui/button.tsx"
+outputs:
+  ui_import: "@/components/ui"
+  components: "button,input,label,card,badge"
+compatible_verticals: ["saas_web"]

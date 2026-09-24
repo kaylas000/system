@@ -31,7 +31,17 @@ from ..state import FileChange, VerificationGateResult
 
 ID_RE = re.compile(r"^[a-z0-9_-]+$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-z0-9.]+)?$")
-CATEGORIES = {"scaffold", "config", "feature", "integration", "migration", "test", "ci_cd", "docs"}
+CATEGORIES = {
+    "scaffold",
+    "config",
+    "feature",
+    "integration",
+    "migration",
+    "test",
+    "ci_cd",
+    "docs",
+    "infra",
+}  # "infra": CATALOG.md
 
 
 class SkillLoadError(ValueError):

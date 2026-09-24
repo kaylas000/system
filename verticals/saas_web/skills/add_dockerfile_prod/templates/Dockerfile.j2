@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+ARG NODE_VERSION={{ node_version }}
+
+FROM node:${NODE_VERSION}-alpine AS base
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json {% if package_manager == "pnpm" %}pnpm-lock.yaml{% else %}package-lock.json{% endif %} ./
+{% if has_prisma %}COPY prisma ./prisma
+{% endif %}{% if package_manager == "pnpm" %}RUN corepack enable pnpm && pnpm install --frozen-lockfile
+{% else %}RUN npm ci
+{% endif %}
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1
+{% if has_prisma %}RUN npx prisma generate
+{% endif %}RUN npm run build
+
+FROM base AS runner
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT={{ port }} \
+    HOSTNAME=0.0.0.0
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+{% if has_prisma %}COPY --from=builder /app/prisma ./prisma
+{% endif %}USER nextjs
+EXPOSE {{ port }}
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:{{ port }}/api/health || exit 1
+CMD ["node", "server.js"]

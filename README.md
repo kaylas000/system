@@ -15,7 +15,7 @@
 | 1 | Kernel: state, протоколы, граф, HITL, чекпойнты | ✅ |
 | 2 | Infra: песочницы (E2B/Docker), инструменты, LLM-шлюз, бюджет | ✅ (проверено на моках; с реальными E2B и LLM не запускалось — нет ключей. LSP/RAG-инструменты отложены) |
 | 3 | Skills: движок скиллов, реестр, загрузчик вертикалей | ✅ |
-| 5 | Вертикаль SaaS Web — до первого собранного проекта | ⏳ в работе |
+| 5 | Вертикаль SaaS Web — до первого собранного проекта | ✅ скиллы и гейты (проверено `next build`); запуск с LLM ждёт ключей |
 | 4 | Knowledge (RAG) | — |
 | 6 | Ops: CI/CD, наблюдаемость, бюджет, HITL API, деплой | — |
 | 7 | Gateway: API, роутер, оркестратор, auth, CLI | — |
@@ -45,6 +45,9 @@ kernel/
                       VerticalLoader, GenericVertical (вертикаль без своего кода)
   prompts/            PromptCompiler + промпты по умолчанию (PLANNER/CODER/FIXER/DOCUMENTER)
 tests/kernel/         unit + e2e на фейковом LLM; E2B, docker и litellm замоканы
+verticals/saas_web/   вертикаль Next.js + tRPC + Prisma + Auth.js (см. verticals/saas_web/README.md)
+tests/verticals/      загрузка вертикали, хелперы хуков, парсеры, рендер цепочки скиллов
+scripts/e2e_saas_skills.py  полная сборка Todo-приложения скиллами без LLM (npm install, гейты, next build)
 ```
 
 ## Настройка (переменные окружения)

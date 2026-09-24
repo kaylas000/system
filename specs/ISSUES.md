@@ -90,11 +90,19 @@
 
 | ID | Где | Проблема | Статус |
 |---|---|---|---|
-| V-01 | `skills/add_trpc_router/skill.yaml:10` | `depends_on: [init_trpc_setup, ...]` — такого скилла нет ни в `MANIFEST.yaml`, ни в `CATALOG.md` | open |
-| V-02 | `CATALOG.md` / `README.md` vs `MANIFEST.yaml` | `init_prisma` vs `init_prisma_postgres`, `add_trpc` vs `add_trpc_router` — разные имена одного скилла | open (канон: имена из `MANIFEST.yaml`) |
-| V-03 | `verification/PARSERS.py:165` | `parser(self, result)` для функций с одним аргументом → `TypeError` | open |
-| V-04 | `verification/PARSERS.py:117,129,145` | `result.files_to_fix.add(...)` у `list` → `AttributeError` | open |
-| V-05 | часть 5 | Из 10 скиллов дан только `add_trpc_router`; нет промптов `FIXER.j2`, `REVIEWER.j2`, `DOCUMENTER.j2`; упомянуты, но не даны `prompts/compiler.py`, `prompts/examples/planner_saas.jsonl` | open |
+| V-01 | `skills/add_trpc_router/skill.yaml:10` | `depends_on: [init_trpc_setup, ...]` — такого скилла нет ни в `MANIFEST.yaml`, ни в `CATALOG.md` | fixed: скилл `init_trpc_setup` из addenda v2 §M (с исправлениями A-06/A-07) — `verticals/saas_web/skills/init_trpc_setup` |
+| V-02 | `CATALOG.md` / `README.md` vs `MANIFEST.yaml` | `init_prisma` vs `init_prisma_postgres`, `add_trpc` vs `add_trpc_router` — разные имена одного скилла | fixed: в `verticals/saas_web` только полные имена из `MANIFEST.yaml` |
+| V-03 | `verification/PARSERS.py:165` | `parser(self, result)` для функций с одним аргументом → `TypeError` | fixed: `verticals/saas_web/verification/parsers.py` — модульные функции + `PARSERS` |
+| V-04 | `verification/PARSERS.py:117,129,145` | `result.files_to_fix.add(...)` у `list` → `AttributeError` | fixed (там же; `VerificationGateResult` frozen → `model_copy`) |
+| V-05 | часть 5 | Из 10 скиллов дан только `add_trpc_router`; нет промптов `FIXER.j2`, `REVIEWER.j2`, `DOCUMENTER.j2`; упомянуты, но не даны `prompts/compiler.py`, `prompts/examples/planner_saas.jsonl` | частично: 10 скиллов в `verticals/saas_web/skills` (из addenda с A-xx или написаны агентом — указано в шапке каждого `skill.yaml`); FIXER/DOCUMENTER — kernel defaults; `compiler.py` — `kernel/prompts/compiler.py`; REVIEWER (узла нет в графе) и few-shot jsonl — open. Stripe, admin, Playwright, Sentry, rate limiting, feature flags, env validation — не реализованы (open) |
+| V-06 | `PARSERS.py` | Регулярки не совпадают с реальным выводом: tsc печатает `file(line,col): error TSxxxx`, `next lint` — формат stylish, не JSON | fixed: парсеры проверены на реальном выводе (e2e) и в `tests/verticals` |
+| V-07 | `GATES.yaml` | `pnpm run test:contract`, Playwright, semgrep, `next-bundle-analyzer` — таких скриптов/инструментов нет в стеке; `prisma generate` как гейт | fixed: в `verticals/saas_web/verification/GATES.yaml` только исполнимые гейты; команды через `npm run`/`npx --no-install` (работают и для pnpm-проектов) |
+| V-08 | `GATES.yaml` + ядро | Гейты задачи запускаются параллельно; `next build` переписывает `.next/`, а `tsc` в это время читает `.next/types` → ложные TS6053 (воспроизведено в e2e) | fixed: `exclusive: true` у `build_nextjs`, `verifier.run_gates` запускает такие гейты после остальных, по одному |
+| V-09 | `add_trpc_router/templates/router.ts.j2` | `ctx.db.{{ model_name }}` (Prisma-делегат в camelCase: `ctx.db.todo`); лишний импорт `prisma` из `@/server/db`; проверки владельца оставлены как TODO; `z.string().nonempty()` (заменено на `.min(1)`) | fixed: делегат в camelCase, `ctx.db`, фильтр/проверка `userId` для моделей с владельцем, поля выводятся из `schema.prisma` |
+| V-10 | `VERTICAL_IMPL.py` | Регистрация роутера в `on_task_complete` через поиск `mergeRouters(` (в tRPC 11 root его нет) | fixed: регистрация в хуке скилла в том же наборе изменений (`verticals/saas_web/lib/trpc.py`); `VERTICAL_IMPL.py` не нужен — вертикаль работает на `GenericVertical` |
+| V-11 | ядро (coder) | Свободный кодер (LLM) не видел содержимого файлов проекта — только список путей из `project_files` | fixed: дерево файлов из песочницы + содержимое `manifest.coder.context_files` и путей, упомянутых в задаче (`open_files`, как в спец. `CODER.j2`) |
+| V-12 | ядро | Project-level гейты (`get_verification_gates(state, None)`) нигде не вызывались | fixed: packager выполняет их последовательно, результат — `quality_report.final_verification` (не блокирует: все гейты задач уже прошли); `kernel.final_verification` |
+| V-13 | сеть песочницы разработки | `binaries.prisma.sh` недоступен из этой среды → `prisma generate` падает | среда разработки: `scripts/e2e_saas_skills.py --fake-prisma-engines`; в E2B/Docker-песочнице движки скачиваются штатно |
 
 ## 7. Ops (часть 6)
 

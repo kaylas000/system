@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
 from ...protocols import LLMMessage
 from ...state import AgentState, FileChange, RunStatus, Task, TokenUsage, get_current_task, update_task_in_graph, utcnow
 from ..deps import KernelDeps
-from ._common import add_usage, content_hashes, log, sanitize_changes
+from ._common import (
+    add_usage,
+    content_hashes,
+    list_workspace_files,
+    log,
+    mentioned_paths,
+    read_context_files,
+    sanitize_changes,
+)
 
 NODE = "coder"
 
@@ -45,8 +54,16 @@ async def coder_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
         extra["skill_outputs"] = {**(state.get("skill_outputs") or {}), task.skill_id: dict(result.outputs)}
         how = f"skill {task.skill_id}"
     else:
+        tree = await list_workspace_files(deps.sandbox, sandbox_id, workspace)
+        wanted: list[str] = list(getattr(deps.vertical, "context_files", lambda s, t: [])(state, task))
+        wanted += mentioned_paths(task.description, json.dumps(task.inputs, default=str))
+        present = set(tree)
+        open_files = await read_context_files(
+            deps.sandbox, sandbox_id, workspace, [p for p in dict.fromkeys(wanted) if p in present]
+        )
+        view = cast(AgentState, {**state, "file_tree": tree, "open_files": open_files})
         messages = [
-            LLMMessage(role="system", content=deps.vertical.get_coder_prompt(state, task)),
+            LLMMessage(role="system", content=deps.vertical.get_coder_prompt(view, task)),
             LLMMessage(role="user", content=task_user_message(task)),
         ]
         resp = await deps.llm.achat(messages, model=deps.settings.llm.default_model, response_model=CodeChanges)

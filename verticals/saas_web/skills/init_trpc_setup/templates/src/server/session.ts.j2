@@ -1,0 +1,9 @@
+// Session accessor used by the tRPC context.
+// init_trpc_setup ships an anonymous stub; add_nextauth_credentials replaces it with Auth.js.
+export type AppSession = {
+  user: { id: string; email?: string | null; name?: string | null; role: "USER" | "ADMIN" };
+} | null;
+
+export async function getSession(): Promise<AppSession> {
+  return null;
+}

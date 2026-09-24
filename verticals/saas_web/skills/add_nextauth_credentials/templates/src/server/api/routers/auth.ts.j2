@@ -1,0 +1,27 @@
+import { TRPCError } from "@trpc/server";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
+
+import { createTRPCRouter, protectedProcedure, publicProcedure } from "@/server/api/trpc";
+
+export const registerInput = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: z.string().trim().toLowerCase().email(),
+  password: z.string().min(8).max(128),
+});
+
+export const authRouter = createTRPCRouter({
+  register: publicProcedure.input(registerInput).mutation(async ({ ctx, input }) => {
+    const exists = await ctx.db.user.findUnique({ where: { email: input.email } });
+    if (exists) {
+      throw new TRPCError({ code: "CONFLICT", message: "A user with this e-mail already exists" });
+    }
+    const user = await ctx.db.user.create({
+      data: { name: input.name, email: input.email, passwordHash: await bcrypt.hash(input.password, 12) },
+      select: { id: true, email: true },
+    });
+    return user;
+  }),
+
+  me: protectedProcedure.query(({ ctx }) => ctx.session.user),
+});
