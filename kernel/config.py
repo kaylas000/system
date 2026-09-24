@@ -20,6 +20,8 @@ class KernelSection(BaseModel):
     recursion_limit: int = 100  # LangGraph recursion limit (spec: 50, too low for 25 tasks x fix loops)
     generate_docs: bool = True  # documenter writes README/ARCHITECTURE via LLM if the vertical has a prompt
     final_verification: bool = True  # run all blocking gates once before packaging
+    verticals_dir: str = "verticals"  # VerticalLoader root (service mode)
+    default_vertical: str = "saas_web"  # used when a request has no vertical_id (gateway classifier: phase 7)
 
 
 class LLMSection(BaseModel):
