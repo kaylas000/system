@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ...protocols import LLMMessage
 from ...state import AgentState, InterruptType, RunStatus, Task, TokenUsage, utcnow, validate_dag
 from ..deps import KernelDeps
-from ._common import add_usage, log
+from ._common import PLANNER_CONTEXT_CHARS, add_usage, decode_context_files, log
 from ._rag import with_rag_context
 
 NODE = "planner"
@@ -35,6 +35,16 @@ def build_user_message(state: AgentState) -> str:
     parts = [f"USER REQUIREMENTS:\n{state.get('user_prompt', '')}"]
     if state.get("constraints"):
         parts.append("CONSTRAINTS:\n" + "\n".join(f"- {c}" for c in state.get("constraints", [])))
+    files, _ = decode_context_files(list(state.get("context_files") or []))
+    if files:
+        blocks = []
+        for f in files:
+            body = f.content if len(f.content) <= PLANNER_CONTEXT_CHARS else f.content[:PLANNER_CONTEXT_CHARS] + "\n..."
+            blocks.append(f"--- {f.path} ---\n{body}")
+        parts.append(
+            "CONTEXT FILES (already in the workspace; treat contracts as binding, do not regenerate them):\n"
+            + "\n".join(blocks)
+        )
     feedback = (state.get("human_decision") or {}).get("comment")
     if feedback:
         parts.append(f"HUMAN FEEDBACK ON PREVIOUS PLAN:\n{feedback}")

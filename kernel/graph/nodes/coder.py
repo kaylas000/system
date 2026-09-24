@@ -58,6 +58,7 @@ async def coder_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]:
         tree = await list_workspace_files(deps.sandbox, sandbox_id, workspace)
         wanted: list[str] = list(getattr(deps.vertical, "context_files", lambda s, t: [])(state, task))
         wanted += mentioned_paths(task.description, json.dumps(task.inputs, default=str))
+        wanted += [str(c.get("name", "")) for c in state.get("context_files") or []]
         present = set(tree)
         open_files = await read_context_files(
             deps.sandbox, sandbox_id, workspace, [p for p in dict.fromkeys(wanted) if p in present]

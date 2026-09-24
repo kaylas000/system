@@ -7,7 +7,7 @@ from typing import Any
 from ...protocols import GenerateRequest, SandboxSpec
 from ...state import AgentState, RunStatus, TokenUsage, utcnow
 from ..deps import KernelDeps
-from ._common import log, merged_metadata
+from ._common import decode_context_files, log, merged_metadata
 
 NODE = "initialize"
 
@@ -47,10 +47,17 @@ async def initialize_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]
     manifest = deps.vertical.manifest
     delta = dict(await deps.vertical.initialize_state(request_from_state(state)))
 
+    context_logs: list[str] = []
     if state.get("sandbox_id"):  # resumed run: reuse sandbox
         sandbox_id = state["sandbox_id"]
     else:
         sandbox_id = await deps.sandbox.create(sandbox_spec_for(deps, delta.pop("sandbox_env", None)))
+        # request context files (e.g. shared contracts of a composition) go into the workspace first
+        files, warnings = decode_context_files(list(state.get("context_files") or []))
+        if files:
+            await deps.sandbox.write_files(sandbox_id, files, deps.settings.sandbox.workspace_path)
+            context_logs.append(log(NODE, f"context files: {', '.join(f.path for f in files)}"))
+        context_logs += [log(NODE, w) for w in warnings]
 
     vertical_meta = delta.pop("metadata", {}) or {}
     update: dict[str, Any] = {
@@ -68,6 +75,6 @@ async def initialize_node(state: AgentState, deps: KernelDeps) -> dict[str, Any]
         "token_usage": state.get("token_usage") or TokenUsage(),
         "metadata": merged_metadata(state, **vertical_meta),
         "error": None,
-        "logs": [log(NODE, f"vertical={manifest.id} v{manifest.version} sandbox={sandbox_id}")],
+        "logs": [log(NODE, f"vertical={manifest.id} v{manifest.version} sandbox={sandbox_id}"), *context_logs],
     }
     return update

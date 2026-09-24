@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import posixpath
 import re
@@ -48,6 +50,41 @@ def sanitize_changes(changes: list[FileChange]) -> list[FileChange]:
             raise UnsafePathError(f"Unsafe file path from LLM: {change.path!r}")
         safe.append(change if norm == change.path else change.model_copy(update={"path": norm}))
     return safe
+
+
+CONTEXT_UPLOAD_MAX_BYTES = 1_000_000  # per file
+CONTEXT_UPLOAD_TOTAL_BYTES = 5_000_000
+PLANNER_CONTEXT_CHARS = 6_000  # per file in the planner prompt
+
+
+def decode_context_files(items: list[dict[str, str]]) -> tuple[list[FileChange], list[str]]:
+    """``GenerateRequest.context_files`` (``{name, content_base64}``) -> text files + warnings.
+
+    Files are written into the workspace under ``name`` (e.g. shared contracts ``contracts/openapi.yaml``);
+    unsafe paths, binary / oversized files are skipped with a warning.
+    """
+    files: list[FileChange] = []
+    warnings: list[str] = []
+    total = 0
+    for item in items:
+        name = str(item.get("name") or "").strip()
+        try:
+            (change,) = sanitize_changes([FileChange(path=name or ".", content="", action="create")])
+            data = base64.b64decode(str(item.get("content_base64") or ""), validate=True)
+        except (UnsafePathError, binascii.Error, ValueError) as exc:
+            warnings.append(f"context file {name!r} skipped: {exc}")
+            continue
+        if len(data) > CONTEXT_UPLOAD_MAX_BYTES or total + len(data) > CONTEXT_UPLOAD_TOTAL_BYTES:
+            warnings.append(f"context file {name!r} skipped: too large ({len(data)} bytes)")
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            warnings.append(f"context file {name!r} skipped: not UTF-8 text")
+            continue
+        total += len(data)
+        files.append(change.model_copy(update={"content": text}))
+    return files, warnings
 
 
 def merged_metadata(state: Any, **updates: Any) -> dict[str, Any]:
