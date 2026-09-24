@@ -91,6 +91,42 @@ class ObservabilitySection(BaseModel):
     log_json: bool = True
 
 
+class TierLimits(BaseModel):
+    rpm: int  # requests per minute (all authenticated API calls)
+    rpd: int  # generations per day
+    concurrent: int  # runs executing at the same time (per tenant)
+
+
+def _default_tiers() -> dict[str, TierLimits]:
+    return {
+        "free": TierLimits(rpm=10, rpd=100, concurrent=1),
+        "pro": TierLimits(rpm=60, rpd=1000, concurrent=5),
+        "enterprise": TierLimits(rpm=300, rpd=10000, concurrent=20),
+    }
+
+
+class GatewaySection(BaseModel):
+    """Public API (``kernel.gateway``): auth, quotas, routing, composition."""
+
+    auth_enabled: bool = True  # False only for local development (every request is an anonymous admin)
+    jwt_secret: SecretStr | None = None  # HS256 tokens
+    jwt_public_key: str | None = None  # PEM for RS256/ES256 tokens
+    jwks_url: str | None = None  # Auth0 / Clerk / Keycloak JWKS endpoint
+    jwt_algorithms: list[str] = Field(default_factory=lambda: ["HS256", "RS256", "ES256"])
+    jwt_issuer: str | None = "autogen-platform"
+    jwt_audience: str | None = None
+    db_path: str = ".data/gateway.sqlite"  # API keys, run registry, idempotency keys
+    redis_url: str | None = None  # shared rate limits across replicas; None -> in-process counters
+    tiers: dict[str, TierLimits] = Field(default_factory=_default_tiers)
+    default_tier: str = "pro"
+    classifier_model: str = "router/classifier"
+    composer_model: str = "router/planner"
+    public_base_url: str | None = None  # e.g. "https://api.example.com" for stream_url; None -> from the request
+    cors_origins: list[str] = Field(default_factory=list)
+    max_budget_usd: float = 100.0  # upper bound for GenerateRequest.max_budget_usd
+    allow_private_webhooks: bool = False  # webhook_url to private / loopback addresses (SSRF guard)
+
+
 class BudgetSection(BaseModel):
     """Limits enforced by ``kernel.llm.budget.BudgetManager`` (in addition to ``max_budget_usd`` per request)."""
 
@@ -123,6 +159,7 @@ class Settings(BaseSettings):
     vector_db: VectorDBSection = Field(default_factory=VectorDBSection)
     knowledge: KnowledgeSection = Field(default_factory=KnowledgeSection)
     budget: BudgetSection = Field(default_factory=BudgetSection)
+    gateway: GatewaySection = Field(default_factory=GatewaySection)
     observability: ObservabilitySection = Field(default_factory=ObservabilitySection)
     hitl: HITLSection = Field(default_factory=HITLSection)
     artifacts: ArtifactsSection = Field(default_factory=ArtifactsSection)
