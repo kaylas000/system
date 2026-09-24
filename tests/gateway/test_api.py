@@ -28,13 +28,21 @@ OTHER = VerticalManifest(
 
 
 class Env:
-    def __init__(self, tmp_path: Path, settings: Settings, responses: list[Any], **gateway: Any) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        settings: Settings,
+        responses: list[Any],
+        llm: Any = None,
+        plan_review: bool = True,
+        **gateway: Any,
+    ) -> None:
         cfg: dict[str, Any] = {"auth_enabled": True, "jwt_secret": "x" * 40, "allow_private_webhooks": True}
         cfg.update(gateway)
         self.settings = settings.model_copy(
-            update={"hitl": HITLSection(plan_review=True), "gateway": GatewaySection(**cfg)}
+            update={"hitl": HITLSection(plan_review=plan_review), "gateway": GatewaySection(**cfg)}
         )
-        self.llm = FakeLLM(responses)
+        self.llm = llm or FakeLLM(responses)
         vertical = FakeVertical()
         graph = build_graph(None, checkpointer=memory_checkpointer())
         self.manager = RunManager(
@@ -44,7 +52,12 @@ class Env:
         self.limiter = InMemoryRateLimiter()
         manifests = {"fake": vertical.manifest, "other": OTHER}
         self.app = create_gateway_app(
-            self.settings, run_manager=self.manager, manifests=manifests, store=self.store, limiter=self.limiter
+            self.settings,
+            run_manager=self.manager,
+            manifests=manifests,
+            store=self.store,
+            limiter=self.limiter,
+            llm_client=self.llm,
         )
         self.services = self.app.state.gateway
         self.webhook_calls: list[tuple[str, dict[str, Any]]] = []

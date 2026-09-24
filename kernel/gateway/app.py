@@ -16,6 +16,12 @@ rpm; runs are visible only inside the owner tenant (other tenants get 404).
     GET    /v1/runs/{id}/interrupt       pending HITL interrupt
     POST   /v1/runs/{id}/interrupt       human decision (also /approve) — takes a concurrent-run slot
     WS     /v1/ws/runs/{id}              live events (``?access_token=`` for browsers)
+    GET    /v1/runs/{id}/artifact        tar.gz of a completed run
+    POST   /v1/compositions              multi-vertical system (LLM plan or a ready plan; ``dry_run``)
+    GET    /v1/compositions/{id}         plan, levels, sub-project runs, status
+    GET    /v1/compositions/{id}/events  SSE
+    DELETE /v1/compositions/{id}         cancel (cancels running sub-projects)
+    GET    /v1/compositions/{id}/artifact  aggregated tar.gz (sub-projects + shared/ + glue files)
 
 Quotas: rpm on every call, rpd per generation, concurrent executing runs per tenant (slot released when
 the execution stops: done, error, HITL pause or cancel). ``X-Request-ID`` is accepted or generated and
@@ -33,10 +39,11 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import WebSocketException
 from starlette.requests import HTTPConnection
@@ -51,6 +58,7 @@ from kernel.runner import new_run_id
 from kernel.service import RunEvent, RunManager, RunNotFoundError
 
 from .auth import GatewayAuth, QuotaExceeded, RateLimiter, build_rate_limiter, quota_http_error, require_role
+from .composer import Composer, CompositionPlan, PlanError, validate_plan
 from .router import RoutingDecision, UnknownVerticalError, VerticalRouter, manifest_summary
 from .store import GatewayStore, Principal, RunRecord
 from .webhooks import WebhookSender, WebhookURLError, validate_webhook_url
@@ -85,6 +93,17 @@ class RunListItem(BaseModel):
     progress: float | None = None
 
 
+class CompositionBody(BaseModel):
+    prompt: str = Field(min_length=1, max_length=50_000)
+    tech_stack_hints: dict[str, str] = Field(default_factory=dict)
+    constraints: list[str] = Field(default_factory=list)
+    context_files: list[dict[str, str]] = Field(default_factory=list)  # given to every sub-project
+    max_budget_usd: float | None = None  # per sub-project
+    webhook_url: str | None = None
+    plan: CompositionPlan | None = None  # ready plan: skips the composer LLM
+    dry_run: bool = False  # only return the plan
+
+
 StopListener = Callable[[RunEvent, RunRecord], Any]
 
 
@@ -96,6 +115,7 @@ class GatewayServices:
     auth: GatewayAuth
     router: VerticalRouter
     webhooks: WebhookSender
+    composer: Composer | None = None
     # extra listeners for stopped executions (the composer subscribes here)
     stop_listeners: list[StopListener] = field(default_factory=list)
 
@@ -390,7 +410,195 @@ def build_gateway_router() -> APIRouter:
         manager = get_manager(request)
         return StreamingResponse(_event_stream(manager, run_id), media_type="text/event-stream", headers=_SSE_HEADERS)
 
+    @router.get("/runs/{run_id}/artifact", tags=["runs"], dependencies=[Depends(run_guard)])
+    async def run_artifact(run_id: str, request: Request) -> FileResponse:
+        try:
+            st = await get_manager(request).status(run_id)
+        except RunNotFoundError:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found") from None
+        return _artifact_response((st.get("final_artifact") or {}).get("artifact_path"), run_id)
+
+    # --- compositions ------------------------------------------------------------------------
+    @router.post("/compositions", tags=["compositions"], status_code=status.HTTP_202_ACCEPTED, response_model=None)
+    async def create_composition(
+        body: CompositionBody,
+        request: Request,
+        response: Response,
+        principal: CurrentPrincipal,
+        idempotency_key: str | None = Header(default=None, max_length=200),
+    ) -> dict[str, Any] | JSONResponse:
+        require_role(principal, "developer")
+        services = get_services(request)
+        composer = _composer(services)
+        cfg = services.settings.gateway
+        request_hash = hashlib.sha256(body.model_dump_json().encode()).hexdigest()
+        if idempotency_key and not body.dry_run:
+            existing = await services.store.get_run_by_idempotency_key(principal.tenant_id, idempotency_key)
+            if existing is not None:
+                if existing.request_hash != request_hash:
+                    raise HTTPException(422, "Idempotency-Key was used with a different request")
+                found = await composer.get(existing.run_id)
+                payload = _composition_view(existing.run_id, found, composer, request, services.settings)
+                return JSONResponse(payload, headers={"Idempotent-Replayed": "true"})
+        if body.max_budget_usd is not None and body.max_budget_usd > cfg.max_budget_usd:
+            raise HTTPException(400, f"max_budget_usd exceeds the limit {cfg.max_budget_usd}")
+        if body.webhook_url:
+            try:
+                await validate_webhook_url(body.webhook_url, cfg.allow_private_webhooks)
+            except WebhookURLError as exc:
+                raise HTTPException(400, str(exc)) from None
+        try:
+            if body.plan is not None:
+                plan = body.plan
+                validate_plan(plan, services.router.verticals, principal.can_use_vertical)
+            else:
+                plan = await composer.plan(body.prompt, principal, body.tech_stack_hints)
+        except PlanError as exc:
+            raise HTTPException(400, f"composition plan: {exc}") from None
+        if body.dry_run:
+            response.status_code = status.HTTP_200_OK
+            return {"plan": plan.model_dump(mode="json"), "status": "planned"}
+
+        try:
+            await services.limiter.count_generation(principal.tenant_id, services.auth.limits(principal))
+        except QuotaExceeded as exc:
+            m.GATEWAY_REJECTED.labels(reason=exc.limit).inc()
+            raise quota_http_error(exc) from exc
+        cid = f"cmp_{uuid.uuid4().hex[:12]}"
+        rec = await services.store.add_run(
+            RunRecord(
+                run_id=cid,
+                tenant_id=principal.tenant_id,
+                user_id=principal.user_id,
+                vertical_id="composition",
+                kind="composition",
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                webhook_url=body.webhook_url,
+                routing={"sub_projects": [s.name for s in plan.sub_projects]},
+            )
+        )
+        if rec.run_id != cid:
+            found = await composer.get(rec.run_id)
+            return JSONResponse(_composition_view(rec.run_id, found, composer, request, services.settings))
+        base = GenerateRequest(
+            prompt=body.prompt,
+            tech_stack_hints=body.tech_stack_hints,
+            constraints=body.constraints,
+            context_files=body.context_files,
+            max_budget_usd=body.max_budget_usd,
+        )
+        await composer.start(plan, principal, base, composition_id=cid, webhook_url=body.webhook_url)
+        view = _composition_view(cid, await composer.get(cid), composer, request, services.settings)
+        response.headers["Location"] = view["status_url"]
+        return view
+
+    @router.get("/compositions/{composition_id}", tags=["compositions"])
+    async def get_composition(composition_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+        require_role(principal, "viewer")
+        services = get_services(request)
+        await _owned_composition(services, principal, composition_id)
+        composer = _composer(services)
+        found = await composer.get(composition_id)
+        return _composition_view(composition_id, found, composer, request, services.settings)
+
+    @router.delete("/compositions/{composition_id}", tags=["compositions"])
+    async def cancel_composition(composition_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+        require_role(principal, "developer")
+        services = get_services(request)
+        await _owned_composition(services, principal, composition_id)
+        if not await _composer(services).cancel(composition_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "composition is not running")
+        return {"composition_id": composition_id, "status": "cancelled"}
+
+    @router.get("/compositions/{composition_id}/events", tags=["compositions"])
+    async def composition_events(
+        composition_id: str, request: Request, principal: CurrentPrincipal
+    ) -> StreamingResponse:
+        require_role(principal, "viewer")
+        services = get_services(request)
+        await _owned_composition(services, principal, composition_id)
+        stream = _composition_stream(_composer(services), get_manager(request), composition_id)
+        return StreamingResponse(stream, media_type="text/event-stream", headers=_SSE_HEADERS)
+
+    @router.get("/compositions/{composition_id}/artifact", tags=["compositions"])
+    async def composition_artifact(composition_id: str, request: Request, principal: CurrentPrincipal) -> FileResponse:
+        require_role(principal, "viewer")
+        services = get_services(request)
+        await _owned_composition(services, principal, composition_id)
+        found = await _composer(services).get(composition_id)
+        return _artifact_response(found[1].get("artifact_path") if found else None, composition_id)
+
     return router
+
+
+def _composer(services: GatewayServices) -> Composer:
+    if services.composer is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "composer is not available")
+    return services.composer
+
+
+async def _owned_composition(services: GatewayServices, principal: Principal, cid: str) -> RunRecord:
+    rec = await services.store.get_run(cid)
+    if rec is None or rec.kind != "composition" or rec.tenant_id != principal.tenant_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "composition not found")
+    return rec
+
+
+def _composition_view(
+    cid: str,
+    found: tuple[dict[str, Any], dict[str, Any]] | None,
+    composer: Composer,
+    conn: HTTPConnection,
+    settings: Settings,
+) -> dict[str, Any]:
+    base = _base_url(conn, settings)
+    plan, state = found or ({}, {"status": "unknown"})
+    return {
+        "composition_id": cid,
+        "status": state.get("status"),
+        "running": composer.is_running(cid),
+        "error": state.get("error"),
+        "levels": state.get("levels", []),
+        "current_level": state.get("current_level"),
+        "sub_projects": state.get("sub_projects", {}),
+        "contracts": sorted(state.get("contracts", {})),
+        "artifact_ready": bool(state.get("artifact_path")),
+        "plan": plan,
+        "status_url": f"{base}/v1/compositions/{cid}",
+        "events_url": f"{base}/v1/compositions/{cid}/events",
+        "artifact_url": f"{base}/v1/compositions/{cid}/artifact",
+        "created_at": state.get("created_at"),
+        "updated_at": state.get("updated_at"),
+    }
+
+
+def _artifact_response(path: str | None, name: str) -> FileResponse:
+    if not path or not Path(path).is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "artifact is not available")
+    return FileResponse(path, media_type="application/gzip", filename=f"{name}.tar.gz")
+
+
+async def _composition_stream(composer: Composer, manager: RunManager, cid: str) -> AsyncIterator[str]:
+    queue, pump = await _pump_events(manager, cid, replay=False)
+    try:
+        found = await composer.get(cid)
+        state = found[1] if found else {"status": "unknown"}
+        yield _sse("state", {k: v for k, v in state.items() if k != "contracts"})
+        if not composer.is_running(cid):
+            return
+        while True:
+            try:
+                ev = await asyncio.wait_for(queue.get(), SSE_HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            yield _sse(ev.type, ev.model_dump(mode="json"))
+            if ev.type in TERMINAL_EVENTS:
+                return
+    finally:
+        pump.cancel()
+        await asyncio.gather(pump, return_exceptions=True)
 
 
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -542,6 +750,25 @@ def create_gateway_app(
         router=vertical_router,
         webhooks=WebhookSender(settings),
     )
+    app_ref: dict[str, FastAPI] = {}
+
+    def manager_getter() -> RunManager:
+        manager: RunManager | None = app_ref["app"].state.run_manager
+        if manager is None:
+            raise RuntimeError("run manager is not ready")
+        return manager
+
+    services.composer = Composer(
+        settings,
+        store,
+        limiter,
+        manager_getter,
+        lambda: services.router.verticals,
+        llm=llm_client,
+        limits_for=services.auth.limits,
+        webhook=services.webhooks.dispatch,
+    )
+    services.stop_listeners.append(services.composer.on_run_stopped)
 
     @asynccontextmanager
     async def gateway_setup(app: FastAPI) -> AsyncIterator[None]:
@@ -551,6 +778,10 @@ def create_gateway_app(
             manager: RunManager | None = app.state.run_manager
             if manager is not None and services.on_run_stopped not in manager.stop_hooks:
                 manager.stop_hooks.append(services.on_run_stopped)
+            if services.composer is not None:
+                recovered = await services.composer.recover()
+                if recovered:
+                    logger.warning("%d composition(s) interrupted by the restart marked failed", recovered)
             try:
                 yield
             finally:
@@ -565,6 +796,7 @@ def create_gateway_app(
         include_hitl=False,
     )
     app.state.gateway = services
+    app_ref["app"] = app
     if run_manager is not None:  # tests without lifespan
         run_manager.stop_hooks.append(services.on_run_stopped)
 
