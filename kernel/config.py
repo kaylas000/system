@@ -57,8 +57,28 @@ class DatabaseSection(BaseModel):
 
 
 class VectorDBSection(BaseModel):
-    qdrant_url: str = "http://qdrant:6333"
+    qdrant_url: str | None = None  # e.g. "http://qdrant:6333"; None -> embedded Qdrant at ``qdrant_path``
     api_key: SecretStr | None = None
+    qdrant_path: str = ".data/qdrant"  # embedded mode storage (":memory:" for throw-away)
+    collection: str = "code_chunks"
+
+
+class KnowledgeSection(BaseModel):
+    """Knowledge base (``specs/04_knowledge``). Disabled by default: agents work without RAG."""
+
+    enabled: bool = False
+    graph_path: str = ".data/knowledge_graph.sqlite"  # ":memory:" for throw-away
+    embedder: str = "litellm"  # "litellm" | "hashing" (offline, lexical only)
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 768
+    embedding_api_base: str | None = None  # None -> llm.gateway_url
+    enrichment_model: str = "router/enricher"
+    reranker: str = "heuristic"  # "heuristic" | "llm" | "cross_encoder"
+    reranker_model: str = "router/reranker"
+    top_k_planning: int = 8
+    top_k_coding: int = 6
+    top_k_fixing: int = 5
+    max_context_chars: int = 6000
 
 
 class ObservabilitySection(BaseModel):
@@ -83,6 +103,7 @@ class Settings(BaseSettings):
     sandbox: SandboxSection = Field(default_factory=SandboxSection)
     database: DatabaseSection = Field(default_factory=DatabaseSection)
     vector_db: VectorDBSection = Field(default_factory=VectorDBSection)
+    knowledge: KnowledgeSection = Field(default_factory=KnowledgeSection)
     observability: ObservabilitySection = Field(default_factory=ObservabilitySection)
     hitl: HITLSection = Field(default_factory=HITLSection)
     artifacts: ArtifactsSection = Field(default_factory=ArtifactsSection)
