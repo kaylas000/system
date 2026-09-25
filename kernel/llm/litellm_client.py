@@ -66,6 +66,34 @@ def _merge_usage(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
     return {k: a.get(k, 0) + b.get(k, 0) for k in ("prompt_tokens", "completion_tokens", "total_tokens")}
 
 
+# Per-call cost reported by the gateway (LiteLLM proxy / OmniRoute); litellm exposes response headers
+# in ``_hidden_params["additional_headers"]`` (raw and ``llm_provider-`` prefixed).
+COST_HEADERS = ("x-omniroute-response-cost", "x-litellm-response-cost")
+
+
+def gateway_model(model: str) -> str:
+    """litellm model for an OpenAI-compatible gateway: ``openai/`` + the gateway's model id, passed verbatim."""
+    return f"openai/{model}"
+
+
+def resolve_alias(model: str, aliases: dict[str, str]) -> str:
+    return aliases.get(model) or aliases.get("*") or model
+
+
+def header_cost(resp: Any) -> float | None:
+    hidden = getattr(resp, "_hidden_params", None) or {}
+    headers = hidden.get("additional_headers") or {}
+    lowered = {str(k).lower(): v for k, v in headers.items()}
+    for name in COST_HEADERS:
+        for key in (name, f"llm_provider-{name}"):
+            if lowered.get(key) not in (None, ""):
+                try:
+                    return float(lowered[key])
+                except (TypeError, ValueError):
+                    continue
+    return None
+
+
 class LiteLLMClient:
     """``ILLMClient`` implementation. Works with a LiteLLM proxy (``llm.gateway_url``) or direct providers."""
 
@@ -86,8 +114,13 @@ class LiteLLMClient:
 
     async def _complete(self, **kwargs: Any) -> Any:
         s = self.settings.llm
+        model = resolve_alias(str(kwargs["model"]), s.model_aliases)
         if s.gateway_url:
             kwargs.setdefault("api_base", s.gateway_url)
+            model = gateway_model(model)
+        kwargs["model"] = model
+        if s.extra_headers:
+            kwargs["extra_headers"] = {**s.extra_headers, **(kwargs.get("extra_headers") or {})}
         if s.api_key is not None:
             kwargs.setdefault("api_key", s.api_key.get_secret_value())
         kwargs.setdefault("timeout", s.request_timeout)
@@ -97,6 +130,9 @@ class LiteLLMClient:
     def _cost(self, resp: Any) -> float:
         if self._cost_fn is not None:
             return float(self._cost_fn(resp))
+        reported = header_cost(resp)
+        if reported is not None:
+            return reported
         try:
             return float(self._litellm().completion_cost(completion_response=resp) or 0.0)
         except Exception:  # unknown model pricing (e.g. gateway aliases)

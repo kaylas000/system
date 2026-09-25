@@ -2,10 +2,16 @@
 # development environment (no Docker) — structure is checked against the compose-spec schema in tests.
 #
 #   cp deploy/.env.example deploy/.env   # fill in keys
-#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#   LLM gateway - pick one (see deploy/README.md "LLM"):
+#     OmniRoute already running elsewhere:  LLM_GATEWAY_URL=http://host.docker.internal:20128/v1, no profile
+#     OmniRoute in this stack:              --profile omniroute, LLM_GATEWAY_URL=http://omniroute:20128/v1
+#     LiteLLM proxy in this stack:          --profile litellm (default LLM_GATEWAY_URL)
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile omniroute up -d --build
 #   docker compose -f deploy/docker-compose.yml --profile observability up -d   # + Prometheus/Grafana/Jaeger
 #
-# Kernel API :8000 (/docs, /metrics), LiteLLM :4000, Grafana :3000 (admin / $GRAFANA_ADMIN_PASSWORD), Jaeger :16686.
+# Kernel API :8000 (/docs, /metrics), OmniRoute dashboard 127.0.0.1:20128, LiteLLM 127.0.0.1:4000,
+# Grafana :3000 (admin / $GRAFANA_ADMIN_PASSWORD), Jaeger :16686.
+# Optional-profile services use ${VAR:-} (compose interpolates every service, even inactive ones).
 name: autogen
 
 x-restart: &restart
@@ -20,8 +26,14 @@ services:
     image: ${KERNEL_IMAGE:-autogen-kernel:local}
     ports: ["${KERNEL_PORT:-8000}:8000"]
     environment:
-      AUTOGEN_LLM__GATEWAY_URL: http://litellm:4000
-      AUTOGEN_LLM__API_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      # Any OpenAI-compatible gateway; model names are sent verbatim, LLM_MODEL_ALIASES maps them (JSON)
+      AUTOGEN_LLM__GATEWAY_URL: ${LLM_GATEWAY_URL:-http://litellm:4000}
+      AUTOGEN_LLM__API_KEY: ${LLM_API_KEY:?set LLM_API_KEY (OmniRoute key or LiteLLM master key)}
+      AUTOGEN_LLM__MODEL_ALIASES: ${LLM_MODEL_ALIASES:-}
+      AUTOGEN_LLM__EXTRA_HEADERS: ${LLM_EXTRA_HEADERS:-}
+      AUTOGEN_KNOWLEDGE__EMBEDDER: ${EMBEDDER:-}
+      AUTOGEN_KNOWLEDGE__EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      AUTOGEN_KNOWLEDGE__EMBEDDING_DIM: ${EMBEDDING_DIM:-}
       AUTOGEN_DATABASE__POSTGRES_DSN: postgresql://autogen:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/autogen
       AUTOGEN_VECTOR_DB__QDRANT_URL: http://qdrant:6333
       AUTOGEN_SANDBOX__PROVIDER: ${SANDBOX_PROVIDER:-e2b}
@@ -36,21 +48,42 @@ services:
       AUTOGEN_GATEWAY__REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379/0
       AUTOGEN_GATEWAY__JWT_SECRET: ${GATEWAY_JWT_SECRET:-}
       AUTOGEN_GATEWAY__WEBHOOK_SECRET: ${GATEWAY_WEBHOOK_SECRET:-}
+    extra_hosts: ["host.docker.internal:host-gateway"]  # reach an OmniRoute running on the host
     volumes:
       - kernel-data:/data
     depends_on:
       postgres: {condition: service_healthy}
       qdrant: {condition: service_started}
-      litellm: {condition: service_healthy}
       redis: {condition: service_healthy}
+      litellm: {condition: service_healthy, required: false}
+      omniroute: {condition: service_started, required: false}
 
+  # --- LLM gateway, option 1: OmniRoute (profile) -----------------------------------------------
+  # First start: open the dashboard, log in with OMNIROUTE_INITIAL_PASSWORD, connect providers,
+  # Endpoints -> create an API key -> LLM_API_KEY, then `docker compose up -d kernel`.
+  omniroute:
+    <<: *restart
+    profiles: [omniroute]
+    image: diegosouzapw/omniroute:3.8.50
+    ports: ["127.0.0.1:${OMNIROUTE_PORT:-20128}:20128"]
+    stop_grace_period: 40s
+    environment:
+      JWT_SECRET: ${OMNIROUTE_JWT_SECRET:-}
+      API_KEY_SECRET: ${OMNIROUTE_API_KEY_SECRET:-}
+      INITIAL_PASSWORD: ${OMNIROUTE_INITIAL_PASSWORD:-}
+      STORAGE_ENCRYPTION_KEY: ${OMNIROUTE_STORAGE_ENCRYPTION_KEY:-}
+    volumes:
+      - omniroute-data:/app/data
+
+  # --- LLM gateway, option 2: LiteLLM proxy (profile) -------------------------------------------
   litellm:
     <<: *restart
+    profiles: [litellm]
     image: ghcr.io/berriai/litellm:v1.102.1
     command: ["--config", "/app/config.yaml", "--port", "4000"]
-    ports: ["${LITELLM_PORT:-4000}:4000"]
+    ports: ["127.0.0.1:${LITELLM_PORT:-4000}:4000"]
     environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      LITELLM_MASTER_KEY: ${LLM_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       REDIS_HOST: redis
@@ -148,5 +181,6 @@ volumes:
   postgres-data:
   redis-data:
   qdrant-data:
+  omniroute-data:
   prometheus-data:
   grafana-data:

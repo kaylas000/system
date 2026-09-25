@@ -54,7 +54,10 @@ autoscaling:
 
 # Non-secret settings -> ConfigMap (env AUTOGEN_*; see kernel/config.py)
 config:
+  # Any OpenAI-compatible gateway: LiteLLM proxy or OmniRoute (http://omniroute:20128/v1 + MODEL_ALIASES below)
   AUTOGEN_LLM__GATEWAY_URL: http://litellm:4000
+  # AUTOGEN_LLM__MODEL_ALIASES: '{"*": "auto/coding", "router/classifier": "auto/fast"}'
+  # AUTOGEN_LLM__EXTRA_HEADERS: '{"x-omniroute-compression": "off", "x-omniroute-no-memory": "true"}'
   AUTOGEN_VECTOR_DB__QDRANT_URL: http://qdrant:6333
   AUTOGEN_SANDBOX__PROVIDER: e2b
   AUTOGEN_KERNEL__MAX_CONCURRENT_RUNS: "20"

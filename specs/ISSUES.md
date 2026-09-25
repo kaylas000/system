@@ -159,6 +159,7 @@
 | ID | Проблема | Статус |
 |---|---|---|
 | X-01 | Версии моделей и библиотек в ТЗ, вероятно, устарели (в окружении — langgraph 1.2, langchain-core 1.x). Реализация ориентируется на актуальные версии | decision |
+| X-02 | (Дефект реализации, найден агентом.) При `llm.gateway_url` модели `router/*` передавались в litellm без префикса провайдера → `BadRequestError: LLM Provider NOT provided`, то есть режим LiteLLM proxy не работал; стоимость вызовов через шлюз считалась как 0 (litellm не знает цен алиасов), и лимит в долларах не срабатывал. Исправлено: через шлюз модель уходит как есть (`openai/<id>`), алиасы `llm.model_aliases`, стоимость — из заголовков `X-OmniRoute-Response-Cost` / `x-litellm-response-cost`. Добавлена поддержка OmniRoute. Тест на реальном HTTP: `tests/kernel/test_openai_compatible_gateway.py` | fixed |
 
 ## 10. Дополнения (`specs/addenda/`)
 

@@ -34,7 +34,8 @@ def build_embedder_from_settings(settings: Settings, kind: str | None = None) ->
     k = settings.knowledge
     api_base = k.embedding_api_base or settings.llm.gateway_url
     api_key = settings.llm.api_key.get_secret_value() if settings.llm.api_key is not None else None
-    return build_embedder(kind or k.embedder, k.embedding_model, k.embedding_dim, api_base, api_key)
+    headers = settings.llm.extra_headers or None
+    return build_embedder(kind or k.embedder, k.embedding_model, k.embedding_dim, api_base, api_key, headers)
 
 
 def build_reranker(settings: Settings, llm: ILLMClient | None) -> IReranker:

@@ -5,6 +5,7 @@ the spec has no content for this module — written by the agent).
     python -m kernel.main serve --host 0.0.0.0 --port 8000
     python -m kernel.main check        # print the resolved configuration (secrets masked) and exit
     python -m kernel.main migrate      # create the Postgres checkpoint tables
+    python -m kernel.main llm-check    # one tiny real call per configured model (gateway key / aliases)
     python -m kernel.main keys create --tenant acme --user alice --role developer   # gateway API key
     python -m kernel.main keys list | keys revoke agk_acme_xx
     python -m kernel.main token --tenant acme --user alice      # HS256 JWT (gateway.jwt_secret)
@@ -99,6 +100,47 @@ async def migrate(settings: Settings) -> int:
     return 0
 
 
+async def llm_check(settings: Settings) -> int:
+    """One short real call per distinct configured model (+ an embedding if enabled); exit 1 on any failure."""
+    import time
+
+    from .llm.litellm_client import LiteLLMClient, resolve_alias
+    from .protocols import LLMMessage
+
+    s = settings
+    models = dict.fromkeys(
+        [s.llm.planner_model, s.llm.default_model, s.llm.fixer_model, s.gateway.classifier_model,
+         s.gateway.composer_model, s.knowledge.enrichment_model, s.knowledge.reranker_model]
+    )  # fmt: skip
+    client = LiteLLMClient(s)
+    print(f"gateway: {s.llm.gateway_url or '(direct providers)'}")
+    failed = 0
+    for model in models:
+        target = resolve_alias(model, s.llm.model_aliases)
+        started = time.monotonic()
+        try:
+            resp = await client.achat([LLMMessage(role="user", content="Reply with the single word OK.")], model,
+                                      max_tokens=8)  # fmt: skip
+        except Exception as exc:
+            failed += 1
+            print(f"FAIL  {model} -> {target}: {str(exc)[:300]}")
+            continue
+        took = time.monotonic() - started
+        print(f"ok    {model} -> {target}  {took:.1f}s  ${resp.cost_usd:.6f}  {resp.content.strip()[:40]!r}")
+    if s.knowledge.embedder == "litellm":
+        from .knowledge.factory import build_embedder_from_settings
+
+        try:
+            vectors = await build_embedder_from_settings(s).embed(["ping"])
+            print(f"ok    embedding {s.knowledge.embedding_model}  dim={len(vectors[0])}")
+        except Exception as exc:
+            failed += 1
+            print(f"FAIL  embedding {s.knowledge.embedding_model}: {str(exc)[:300]}")
+    else:
+        print(f"skip  embedding (knowledge.embedder={s.knowledge.embedder})")
+    return 1 if failed else 0
+
+
 def _masked(settings: Settings) -> dict[str, Any]:
     data: dict[str, Any] = json.loads(settings.model_dump_json())  # SecretStr -> "**********"
     return data
@@ -148,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int, default=8000)
     sub.add_parser("check", help="print resolved settings and discovered verticals")
     sub.add_parser("migrate", help="create/upgrade the Postgres checkpoint tables and exit")
+    sub.add_parser("llm-check", help="make one tiny real call per configured model and report")
     keys = sub.add_parser("keys", help="manage gateway API keys").add_subparsers(dest="keys_cmd", required=True)
     kc = keys.add_parser("create", help="issue a key (printed once)")
     token = sub.add_parser("token", help="issue an HS256 JWT signed with gateway.jwt_secret")
@@ -176,6 +219,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "migrate":
         return asyncio.run(migrate(settings))
+
+    if a.cmd == "llm-check":
+        return asyncio.run(llm_check(settings))
 
     if a.cmd in ("keys", "token"):
         return asyncio.run(_keys_command(settings, a))

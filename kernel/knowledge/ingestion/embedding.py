@@ -115,6 +115,7 @@ class LiteLLMEmbedder:
         max_retries: int = 3,
         send_dimensions: bool | None = None,
         max_input_chars: int = 24_000,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         self.model = model
         self.dim = dim
@@ -126,11 +127,16 @@ class LiteLLMEmbedder:
         # Only OpenAI text-embedding-3-* (and compatible proxies) accept ``dimensions``.
         self.send_dimensions = ("text-embedding-3" in model) if send_dimensions is None else send_dimensions
         self.max_input_chars = max_input_chars
+        self.extra_headers = dict(extra_headers or {})
 
     async def _call(self, batch: list[str]) -> list[list[float]]:
         import litellm
 
-        kwargs: dict[str, Any] = {"model": self.model, "input": batch}
+        # OpenAI-compatible gateway (LiteLLM proxy / OmniRoute): send the model id verbatim
+        model = f"openai/{self.model}" if self.api_base else self.model
+        kwargs: dict[str, Any] = {"model": model, "input": batch}
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
         if self.send_dimensions:
             kwargs["dimensions"] = self.dim
         if self.api_base:
@@ -165,10 +171,15 @@ class LiteLLMEmbedder:
 
 
 def build_embedder(
-    kind: str, model: str, dim: int, api_base: str | None = None, api_key: str | None = None
+    kind: str,
+    model: str,
+    dim: int,
+    api_base: str | None = None,
+    api_key: str | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> IEmbedder:
     if kind == "hashing":
         return HashingEmbedder(dim)
     if kind == "litellm":
-        return LiteLLMEmbedder(model=model, dim=dim, api_base=api_base, api_key=api_key)
+        return LiteLLMEmbedder(model=model, dim=dim, api_base=api_base, api_key=api_key, extra_headers=extra_headers)
     raise ValueError(f"unknown embedder: {kind!r} (expected 'litellm' or 'hashing')")

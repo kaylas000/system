@@ -26,7 +26,8 @@ class KernelSection(BaseModel):
 
 class LLMSection(BaseModel):
     provider: str = "litellm"  # "litellm" (real calls) | "fake" (tests only)
-    # LiteLLM proxy URL. None -> call providers directly (model names like "anthropic/claude-...").
+    # OpenAI-compatible gateway: LiteLLM proxy ("http://litellm:4000") or OmniRoute ("http://omniroute:20128/v1").
+    # Model names are then sent to the gateway verbatim. None -> call providers directly ("anthropic/claude-...").
     gateway_url: str | None = None
     api_key: SecretStr | None = None  # gateway / provider key (provider keys may also come from their own env vars)
     max_structured_retries: int = 2  # re-ask on invalid structured output
@@ -35,6 +36,11 @@ class LLMSection(BaseModel):
     fixer_model: str = "router/coder"
     request_timeout: int = 120
     max_tokens_per_run: int = 2_000_000
+    # Kernel model name -> real model id; "*" = default for unmapped names. E.g. OmniRoute:
+    # {"*": "auto/coding", "router/classifier": "auto/fast"}. Applies to chat calls (embeddings: knowledge section).
+    model_aliases: dict[str, str] = Field(default_factory=dict)
+    # Sent with every chat/embedding call, e.g. {"x-omniroute-compression": "off", "x-omniroute-no-memory": "true"}.
+    extra_headers: dict[str, str] = Field(default_factory=dict)
 
 
 class SandboxSection(BaseModel):

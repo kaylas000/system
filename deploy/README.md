@@ -22,6 +22,35 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile observability up -d
 ```
 
+### LLM: OmniRoute или LiteLLM
+
+Ядро работает с любым OpenAI-совместимым шлюзом. Имена моделей уходят в шлюз как есть; `LLM_MODEL_ALIASES`
+переводит внутренние имена (`router/coder`, `router/planner`, `router/classifier`, …) в модели шлюза,
+`"*"` — для всех остальных.
+
+| Вариант | `.env` | Профиль |
+|---|---|---|
+| OmniRoute уже запущен на этой машине | `LLM_GATEWAY_URL=http://host.docker.internal:20128/v1`, `LLM_API_KEY=<ключ из Dashboard → Endpoints>` | — |
+| OmniRoute внутри стека | `LLM_GATEWAY_URL=http://omniroute:20128/v1`, `OMNIROUTE_JWT_SECRET`, `OMNIROUTE_API_KEY_SECRET`, `OMNIROUTE_INITIAL_PASSWORD` | `--profile omniroute` |
+| LiteLLM proxy внутри стека | `LLM_GATEWAY_URL=http://litellm:4000`, `LLM_API_KEY=<master key>`, `LLM_MODEL_ALIASES=` (пусто), ключи провайдеров | `--profile litellm` |
+
+OmniRoute внутри стека: сначала `--profile omniroute up -d omniroute`, открыть http://127.0.0.1:20128,
+войти с `OMNIROUTE_INITIAL_PASSWORD`, подключить провайдеров, создать ключ (Endpoints) → `LLM_API_KEY`, затем
+поднять остальное. Проверка ключа и моделей — по одному короткому вызову на модель:
+
+```bash
+docker compose -f deploy/docker-compose.yml exec kernel python -m kernel.main llm-check
+```
+
+- `LLM_EXTRA_HEADERS` по умолчанию выключает в OmniRoute сжатие промптов и подмешивание памяти/скиллов:
+  сжатие с потерями портит код и точные инструкции.
+- Стоимость вызова берётся из заголовка `X-OmniRoute-Response-Cost` (LiteLLM: `x-litellm-response-cost`), так что
+  лимиты `MAX_COST_USD_PER_*` работают. Бесплатные модели OmniRoute отдают 0 — тогда действует только лимит токенов.
+- Эмбеддинги базы знаний: по умолчанию `EMBEDDER=hashing` (офлайн, без модели). Если в OmniRoute подключён провайдер
+  эмбеддингов: `EMBEDDER=litellm`, `EMBEDDING_MODEL=<id>`, `EMBEDDING_DIM=<размерность>`.
+- Образ `diegosouzapw/omniroute:3.8.50` и сервис OmniRoute в compose не запускались здесь (нет Docker); обмен с
+  OmniRoute проверен тестом `tests/kernel/test_openai_compatible_gateway.py` на локальном сервере с тем же API.
+
 API: http://localhost:8000/docs · метрики: `/metrics` · Grafana: http://localhost:3000
 
 Публичный API — `/v1` (Gateway, фаза 7), авторизация включена. Выпустить ключ и проверить:

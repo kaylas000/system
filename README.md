@@ -37,7 +37,7 @@ kernel/
     nodes/            initialize, planner, get_next_task, coder, verifier, fixer,
                       documenter, packager, human_review
   persistence/        чекпойнтер (InMemory / Postgres) и allowlist сериализации
-  llm/                LiteLLMClient (прямые провайдеры или LiteLLM proxy), CostTracker, check_budget
+  llm/                LiteLLMClient (прямые провайдеры или OpenAI-совместимый шлюз: OmniRoute / LiteLLM proxy), CostTracker
   sandbox/            E2BSandbox, DockerSandbox, LocalSandbox (только dev/тесты, без изоляции),
                       SandboxManager (квота, TTL) и фабрика create_sandbox(settings)
   tools/              filesystem, shell (ShellPolicy), git, ToolRegistry, default_tool_registry
@@ -77,8 +77,13 @@ scripts/e2e_saas_skills.py  полная сборка Todo-приложения 
 ## Настройка (переменные окружения)
 
 ```bash
-AUTOGEN_LLM__API_KEY=...                 # или ключи провайдеров: ANTHROPIC_API_KEY, OPENAI_API_KEY
-AUTOGEN_LLM__GATEWAY_URL=http://litellm:4000   # необязательно: LiteLLM proxy
+# LLM через OpenAI-совместимый шлюз: OmniRoute (http://<host>:20128/v1) или LiteLLM proxy (http://litellm:4000).
+# Без шлюза — прямые провайдеры (ANTHROPIC_API_KEY, OPENAI_API_KEY, модели вида anthropic/claude-...).
+AUTOGEN_LLM__GATEWAY_URL=http://localhost:20128/v1
+AUTOGEN_LLM__API_KEY=...                 # ключ шлюза (OmniRoute: Dashboard -> Endpoints)
+AUTOGEN_LLM__MODEL_ALIASES='{"*": "auto/coding", "router/classifier": "auto/fast"}'   # имена ядра -> модели шлюза
+AUTOGEN_LLM__EXTRA_HEADERS='{"x-omniroute-compression": "off", "x-omniroute-no-memory": "true"}'
+python -m kernel.main llm-check          # по одному короткому вызову на каждую модель: ключ и алиасы работают?
 AUTOGEN_SANDBOX__PROVIDER=e2b            # e2b | docker | local
 AUTOGEN_SANDBOX__API_KEY=...             # ключ E2B
 AUTOGEN_SANDBOX__E2B_DEFAULT_TEMPLATE=... # шаблон E2B с node/pnpm (иначе базовый)
