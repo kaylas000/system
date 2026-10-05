@@ -1,0 +1,35 @@
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import bcrypt from "bcryptjs";
+import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+{% if github_oauth %}import GitHub from "next-auth/providers/github";
+{% endif %}import { z } from "zod";
+
+import { db } from "@/server/db";
+
+import { authConfig } from "./config";
+
+const credentialsSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
+  adapter: PrismaAdapter(db),
+  providers: [
+    Credentials({
+      credentials: { email: { type: "email" }, password: { type: "password" } },
+      async authorize(raw) {
+        const parsed = credentialsSchema.safeParse(raw);
+        if (!parsed.success) return null;
+        const user = await db.user.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
+        if (!user?.passwordHash) return null;
+        const valid = await bcrypt.compare(parsed.data.password, user.passwordHash);
+        if (!valid) return null;
+        return { id: user.id, email: user.email, name: user.name, image: user.image, role: user.role };
+      },
+    }),
+{% if github_oauth %}    GitHub,
+{% endif %}  ],
+});

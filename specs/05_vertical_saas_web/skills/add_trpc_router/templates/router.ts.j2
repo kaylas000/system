@@ -1,0 +1,107 @@
+// specs/05_vertical_saas_web/skills/add_trpc_router/templates/router.ts.j2
+import { createTRPCRouter, protectedProcedure, publicProcedure, adminProcedure } from "@/server/api/trpc";
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { prisma } from "@/server/db";
+
+{% macro zod_type(field) %}
+{% if field.type == "string" %}
+z.string(){% if field.validation %}.{{ field.validation }}{% endif %}{% if field.optional %}.optional(){% else %}.nonempty(){% endif %}
+{% elif field.type == "number" %}
+z.number(){% if field.validation %}.{{ field.validation }}{% endif %}{% if field.optional %}.optional(){% endif %}
+{% elif field.type == "boolean" %}
+z.boolean(){% if field.optional %}.optional(){% endif %}
+{% elif field.type == "date" %}
+z.coerce.date(){% if field.optional %}.optional(){% endif %}
+{% elif field.type == "json" %}
+z.any(){% if field.optional %}.optional(){% endif %}
+{% elif field.type == "enum" %}
+z.enum([{% for v in field.enum_values %}'{{ v }}'{% if not loop.last %}, {% endif %}{% endfor %}]){% if field.optional %}.optional(){% endif %}
+{% endif %}
+{% endmacro %}
+
+{% set create_input = namespace(fields=[]) %}
+{% set update_input = namespace(fields=[]) %}
+{% for field in fields %}
+{% if not field.optional or loop.first %}{% set create_input.fields = create_input.fields + [field] %}{% endif %}
+{% set update_input.fields = update_input.fields + [field] %}
+{% endfor %}
+
+export const {{ router_name }}Router = createTRPCRouter({
+  // LIST: Paginated, Filterable
+  list: {% if permissions.list == "public" %}publicProcedure{% elif permissions.list == "admin" %}adminProcedure{% else %}protectedProcedure{% endif %}
+    .input(
+      z.object({
+        limit: z.number().min(1).max(100).default(20),
+        cursor: z.string().optional(),
+        {% for field in fields %}
+        {% if field.type == "string" %}{{ field.name }}: z.string().optional(),{% endif %}
+        {% if field.type == "boolean" %}{{ field.name }}: z.boolean().optional(),{% endif %}
+        {% endfor %}
+        orderBy: z.enum(["asc", "desc"]).default("desc"),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const { limit, cursor, orderBy, ...filters } = input;
+      const items = await ctx.db.{{ model_name }}.findMany({
+        take: limit + 1,
+        cursor: cursor ? { id: cursor } : undefined,
+        where: {
+          {% for field in fields %}
+          {% if field.type == "string" %}{{ field.name }}: filters.{{ field.name }} ? { contains: filters.{{ field.name }}, mode: "insensitive" } : undefined,{% endif %}
+          {% if field.type == "boolean" %}{{ field.name }}: filters.{{ field.name }},{% endif %}
+          {% endfor %}
+        },
+        orderBy: { createdAt: orderBy },
+      });
+      let nextCursor: typeof cursor = undefined;
+      if (items.length > limit) {
+        const nextItem = items.pop();
+        nextCursor = nextItem!.id;
+      }
+      return { items, nextCursor };
+    }),
+
+  // GET BY ID
+  getById: {% if permissions.get == "public" %}publicProcedure{% elif permissions.get == "admin" %}adminProcedure{% else %}protectedProcedure{% endif %}
+    .input(z.object({ id: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      const item = await ctx.db.{{ model_name }}.findUnique({ where: { id: input.id } });
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "{{ model_name }} not found" });
+      return item;
+    }),
+
+  // CREATE
+  create: {% if permissions.create == "admin" %}adminProcedure{% else %}protectedProcedure{% endif %}
+    .input(z.object({
+      {% for field in create_input.fields %}
+      {{ field.name }}: {{ zod_type(field) }},
+      {% endfor %}
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Authorization: Check ownership/org if needed
+      return ctx.db.{{ model_name }}.create({ data: input });
+    }),
+
+  // UPDATE
+  update: {% if permissions.update == "admin" %}adminProcedure{% else %}protectedProcedure{% endif %}
+    .input(z.object({
+      id: z.string().cuid(),
+      {% for field in update_input.fields %}
+      {{ field.name }}: {{ zod_type(field) }},
+      {% endfor %}
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input;
+      // TODO: Add ownership check: const existing = await ctx.db.{{ model_name }}.findUnique({ where: { id } }); if (existing.userId !== ctx.session.user.id) throw...
+      return ctx.db.{{ model_name }}.update({ where: { id }, data });
+    }),
+
+  // DELETE
+  delete: {% if permissions.delete == "admin" %}adminProcedure{% else %}protectedProcedure{% endif %}
+    .input(z.object({ id: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      // TODO: Add ownership check
+      return ctx.db.{{ model_name }}.delete({ where: { id: input.id } });
+    }),
+});

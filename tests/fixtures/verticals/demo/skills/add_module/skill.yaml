@@ -1,0 +1,12 @@
+id: add_module
+name: "Add module"
+version: "1.0.0"
+description: "Adds a module file and registers it in src/main.txt."
+category: feature
+tags: [text]
+depends_on: [init_demo]
+inputs:
+  type: object
+  required: [name]
+  properties:
+    name: {type: string}

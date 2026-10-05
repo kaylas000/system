@@ -1,0 +1,15 @@
+gates:
+  - id: no_todo
+    name: "No TODO markers"
+    command: "! grep -rn TODO --include='*.txt' ."
+    runs_on_every_task: true
+    parser: parse_grep
+  - id: text_only
+    name: "Only text files"
+    command: "test -z \"$(find . -type f ! -name '*.txt' ! -name '.initialized' ! -name '*.md')\""
+    tags: [scaffold]
+  - id: style
+    name: "Style warnings"
+    command: "false"
+    severity: warning
+    runs_on_every_task: true

@@ -1,0 +1,92 @@
+{
+  "dashboard": {
+    "title": "AutoGen Platform - Operational Overview",
+    "uid": "autogen-ops",
+    "tags": ["autogen", "llm", "agents"],
+    "timezone": "utc",
+    "panels": [
+      {
+        "title": "Active Runs (Concurrency)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {"expr": "autogen_runs_active", "legendFormat": "{{vertical}}", "refId": "A"}
+        ]
+      },
+      {
+        "title": "Run Success Rate (5m)",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 0, "w": 6, "h": 8},
+        "targets": [
+          {"expr": "sum(rate(autogen_gate_status{status=\"passed\"}[5m])) / sum(rate(autogen_gate_status[5m]))", "refId": "A"}
+        ],
+        "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+      },
+      {
+        "title": "Avg Run Duration (p50, p95, p99)",
+        "type": "graph",
+        "gridPos": {"x": 18, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {"expr": "histogram_quantile(0.50, sum(rate(autogen_run_duration_bucket[5m])) by (le))", "legendFormat": "p50"},
+          {"expr": "histogram_quantile(0.95, sum(rate(autogen_run_duration_bucket[5m])) by (le))", "legendFormat": "p95"},
+          {"expr": "histogram_quantile(0.99, sum(rate(autogen_run_duration_bucket[5m])) by (le))", "legendFormat": "p99"}
+        ]
+      },
+      {
+        "title": "LLM Token Usage & Cost (Hourly)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {"expr": "sum(rate(autogen_llm_tokens_total[1h])) by (model_name, type)", "legendFormat": "{{model_name}} - {{type}}"},
+          {"expr": "sum(rate(autogen_llm_cost_total[1h])) by (model_name)", "legendFormat": "Cost: {{model_name}}", "refId": "B"}
+        ]
+      },
+      {
+        "title": "Node Latency Breakdown (p95)",
+        "type": "bargauge",
+        "gridPos": {"x": 12, "y": 8, "w": 18, "h": 8},
+        "targets": [
+          {"expr": "histogram_quantile(0.95, sum(rate(autogen_node_duration_bucket[5m])) by (le, node_name))", "legendFormat": "{{node_name}}"}
+        ]
+      },
+      {
+        "title": "Verification Gate Status (Last 1h)",
+        "type": "piechart",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {"expr": "sum(increase(autogen_gate_status_total[1h])) by (gate_id, status)", "legendFormat": "{{gate_id}} - {{status}}"}
+        ]
+      },
+      {
+        "title": "Tool Call Errors (Rate)",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {"expr": "sum(rate(autogen_tool_errors_total[5m])) by (tool_name)", "legendFormat": "{{tool_name}}"}
+        ]
+      },
+      {
+        "title": "Sandbox Execution Time (p95)",
+        "type": "graph",
+        "gridPos": {"x": 24, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {"expr": "histogram_quantile(0.95, sum(rate(autogen_sandbox_exec_duration_bucket[5m])) by (le))", "legendFormat": "Sandbox Exec"}
+        ]
+      },
+      {
+        "title": "Queue Depth & Pending Runs",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 24, "w": 24, "h": 8},
+        "targets": [
+          {"expr": "autogen_queue_depth", "legendFormat": "Queue Depth"},
+          {"expr": "autogen_runs_active", "legendFormat": "Active Runs"}
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {"name": "vertical", "type": "query", "query": "label_values(autogen_runs_active, vertical)", "default": "all", "multi": true}
+      ]
+    }
+  }
+}

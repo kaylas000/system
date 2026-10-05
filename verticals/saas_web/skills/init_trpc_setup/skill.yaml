@@ -1,0 +1,23 @@
+# Written from specs/addenda v2 §M (new skill, A-06/A-07 fixes applied)
+id: init_trpc_setup
+name: "Bootstrap tRPC 11"
+version: "2.0.0"
+description: |
+  tRPC 11 bootstrap for the App Router: context (Prisma + session), superjson, Zod error
+  formatting, public/protected/admin procedures, root router, fetch route handler,
+  React Query provider (client) and a server-side caller for React Server Components.
+category: scaffold
+tags: [trpc, api, backend, react-query, scaffold]
+depends_on: [init_prisma_postgres]
+provides: [trpc, api_root_router]
+inputs:
+  type: object
+  properties: {}
+template_dir: templates
+validation:
+  - "test -f src/server/api/root.ts && test -f 'src/app/api/trpc/[trpc]/route.ts'"
+outputs:
+  root_router: "src/server/api/root.ts"
+  api_import: "@/trpc/react"
+  server_api_import: "@/trpc/server"
+compatible_verticals: ["saas_web"]

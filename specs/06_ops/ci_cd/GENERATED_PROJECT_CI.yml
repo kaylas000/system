@@ -1,0 +1,203 @@
+# specs/06_ops/ci_cd/GENERATED_PROJECT_CI.yml
+# TEMPLATE: Rendered by `add_github_actions_ci` Skill into generated project's .github/workflows/ci.yml
+# Uses Jinja2 variables: {{ project_name }}, {{ vertical_id }}, {{ docker_image }}
+
+name: CI/CD - {{ project_name }}
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  NODE_VERSION: '20'
+  PNPM_VERSION: '9'
+
+jobs:
+  # --- 1. Install & Lint (Fast Feedback) ---
+  lint-and-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with: { version: ${{ env.PNPM_VERSION }} }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }}, cache: 'pnpm' }
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm run lint
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Format Check
+        run: pnpm run format:check
+
+  # --- 2. Unit & Contract Tests ---
+  test:
+    name: Unit & Contract Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: test_db }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: [6379:6379]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }}, cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma Client
+        run: pnpm prisma generate
+      - name: Run Migrations
+        run: pnpm prisma migrate deploy
+        env: { DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db }
+      - name: Run Unit Tests
+        run: pnpm run test:unit -- --coverage
+      - name: Run Contract Tests
+        run: pnpm run test:contract
+
+  # --- 3. Build Application ---
+  build:
+    name: Build Next.js App
+    needs: [lint-and-typecheck, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }}, cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          # Inject build-time env vars if needed
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with: { name: nextjs-build, path: .next/, retention-days: 1 }
+
+  # --- 4. E2E Tests (Playwright) ---
+  e2e:
+    name: E2E Tests
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres: { image: postgres:16-alpine, env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: test_db }, ports: [5432:5432] }
+      redis: { image: redis:7-alpine, ports: [6379:6379] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }}, cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Browsers
+        run: pnpm playwright install --with-deps chromium
+      - name: Run E2E Tests
+        run: pnpm run test:e2e -- --project=chromium
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+      - name: Upload Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: playwright-report, path: playwright-report/, retention-days: 7 }
+
+  # --- 5. Docker Build & Security Scan ---
+  docker:
+    name: Docker Build & Scan
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write, security-events: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with: { registry: ${{ env.REGISTRY }}, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - name: Build Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false # Only push on main/deploy
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.number }}
+          load: true
+      - name: Run Trivy Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.number }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      - name: Upload Trivy Results
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: 'trivy-results.sarif' }
+
+  # --- 6. Deploy Preview (PR) ---
+  deploy-preview:
+    name: Deploy Preview (Vercel/Cloud Run)
+    needs: [docker, e2e]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Vercel Preview
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod=false'
+      - name: Comment PR with Preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🚀 Preview Deployment Ready: ${{ steps.deploy.outputs.url }}'
+            })
+
+  # --- 7. Deploy Production (Main Branch) ---
+  deploy-prod:
+    name: Deploy Production
+    needs: [docker, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+      - name: Deploy to Production (Vercel/AWS/Cloud Run)
+        run: |
+          # Example: Vercel Prod
+          npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }}
+          # OR: Kubernetes (kubectl set image...)
+          # OR: AWS ECS (ecspresso deploy...)
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }} # Or semantic-release tag
+          generate_release_notes: true

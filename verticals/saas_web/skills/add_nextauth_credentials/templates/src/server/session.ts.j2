@@ -1,0 +1,12 @@
+import { auth } from "@/server/auth";
+
+export type AppSession = {
+  user: { id: string; email?: string | null; name?: string | null; role: "USER" | "ADMIN" };
+} | null;
+
+export async function getSession(): Promise<AppSession> {
+  const session = await auth();
+  if (!session?.user?.id) return null;
+  const { id, email, name, role } = session.user;
+  return { user: { id, email, name, role } };
+}

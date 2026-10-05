@@ -1,0 +1,17 @@
+import Link from "next/link";
+
+import { {{ component }} } from "@/components/{{ router_name | kebab_case }}/{{ router_name | kebab_case }}-manager";
+
+export const dynamic = "force-dynamic";
+
+export default function {{ model_name }}Page() {
+  return (
+    <main className="container flex flex-col gap-6 py-10">
+      <Link href="/dashboard" className="text-sm text-muted-foreground hover:underline">
+        &larr; Dashboard
+      </Link>
+      <h1 className="text-3xl font-bold">{{ title }}</h1>
+      <{{ component }} />
+    </main>
+  );
+}

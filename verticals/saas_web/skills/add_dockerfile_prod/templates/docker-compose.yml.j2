@@ -1,0 +1,37 @@
+services:
+  app:
+    build: .
+    ports:
+      - "{{ port }}:{{ port }}"
+    environment:
+{% if has_prisma %}
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/app?schema=public
+{% endif %}
+{% if has_auth %}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
+      AUTH_TRUST_HOST: "true"
+{% endif %}
+{% if has_prisma %}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+{% endif %}

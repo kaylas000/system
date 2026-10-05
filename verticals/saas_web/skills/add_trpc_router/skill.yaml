@@ -1,0 +1,44 @@
+# From specs/05_vertical_saas_web/skills/add_trpc_router with fixes: Prisma delegate is camelCase
+# (`ctx.db.todo`, not `ctx.db.Todo`), import of `@/server/db` removed (ctx.db), ownership enforced
+# instead of TODO comments, fields derived from schema.prisma, root registration in the hook (A-07).
+id: add_trpc_router
+name: "Add tRPC CRUD Router"
+version: "2.0.0"
+description: |
+  Creates src/server/api/routers/<router_name>.ts with list (cursor pagination), getById, create,
+  update, delete for a Prisma model and registers it in the root router. Zod inputs are derived
+  from the model in prisma/schema.prisma. Models with userId are scoped to the signed-in user.
+category: feature
+tags: [trpc, backend, crud, api, zod, prisma]
+depends_on: [init_trpc_setup, add_prisma_model]
+provides: [trpc_router]
+inputs:
+  type: object
+  required: [router_name, model_name]
+  properties:
+    router_name:
+      type: string
+      pattern: '^[a-z][a-zA-Z0-9]*$'
+      description: "Router key in camelCase, e.g. 'todo', 'blogPost'"
+    model_name:
+      type: string
+      pattern: '^[A-Z][a-zA-Z0-9]*$'
+      description: "Existing Prisma model (PascalCase)"
+    permissions:
+      type: object
+      default: {}
+      description: "Only for models without userId (owned models always require a session)"
+      properties:
+        read: {type: string, enum: [public, protected, admin], default: "protected"}
+        write: {type: string, enum: [protected, admin], default: "protected"}
+template_dir: templates
+entrypoint: hooks.py
+post_scripts:
+  - "npx --no-install prettier --write --log-level warn \"src/server/api/routers/{{ router_name }}.ts\" src/server/api/root.ts"
+validation:
+  - "test -f src/server/api/routers/{{ router_name }}.ts"
+outputs:
+  router_name: "{{ router_name }}"
+  model_name: "{{ model_name }}"
+  procedures: "list,getById,create,update,delete"
+compatible_verticals: ["saas_web"]

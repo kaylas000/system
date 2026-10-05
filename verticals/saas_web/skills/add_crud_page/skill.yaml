@@ -1,0 +1,29 @@
+# Written by the agent (not in the spec catalog): CRUD UI on top of add_trpc_router.
+id: add_crud_page
+name: "Add CRUD Dashboard Page"
+version: "1.0.0"
+description: |
+  Dashboard page /dashboard/<segment> with a client component that lists, creates, updates
+  (boolean toggles) and deletes records through the tRPC router created by add_trpc_router.
+  Form inputs are derived from the Prisma model. Adds a link to the dashboard.
+category: feature
+tags: [ui, crud, react, trpc, dashboard, feature]
+depends_on: [add_trpc_router, add_nextauth_credentials]
+provides: [crud_page]
+inputs:
+  type: object
+  required: [router_name, model_name]
+  properties:
+    router_name: {type: string, pattern: '^[a-z][a-zA-Z0-9]*$', description: "Router created by add_trpc_router"}
+    model_name: {type: string, pattern: '^[A-Z][a-zA-Z0-9]*$'}
+    title: {type: string, description: "Page title (default: plural of model name)"}
+    segment: {type: string, pattern: '^[a-z0-9-]+$', description: "URL segment (default: kebab-case plural)"}
+template_dir: templates
+entrypoint: hooks.py
+post_scripts:
+  - "npx --no-install prettier --write --log-level warn \"src/components/{{ router_name | kebab_case }}\" src/app/dashboard"
+validation:
+  - "ls src/components/{{ router_name | kebab_case }}/*-manager.tsx >/dev/null"
+outputs:
+  path: "/dashboard/{{ segment }}"
+compatible_verticals: ["saas_web"]

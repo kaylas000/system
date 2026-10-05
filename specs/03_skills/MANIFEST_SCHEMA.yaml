@@ -1,0 +1,113 @@
+# specs/03_skills/MANIFEST_SCHEMA.yaml
+# JSON Schema для валидации skill.yaml (используется в SkillLoader)
+
+$id: "https://autogen.dev/schemas/skill-manifest-v1.json"
+title: Skill Manifest
+type: object
+required: [id, name, version, description, inputs, template_dir, entrypoint]
+properties:
+  # --- Identity ---
+  id:
+    type: string
+    pattern: '^[a-z0-9-_]+$'
+    description: "Unique ID (npm-style: 'init_nextjs', 'add_prisma_model')"
+  name:
+    type: string
+    description: "Human readable name"
+  version:
+    type: string
+    pattern: '^\d+\.\d+\.\d+(-[a-z0-9.]+)?$'
+    description: "SemVer. Major breaking changes = new skill ID."
+  description:
+    type: string
+    description: "What this skill does, for Planner/LLM context."
+  
+  # --- Categorization ---
+  category:
+    type: string
+    enum: [scaffold, config, feature, integration, migration, test, ci_cd, docs]
+    default: scaffold
+  tags:
+    type: array
+    items: {type: string}
+    description: "Search tags: 'auth', 'database', 'ui', 'aws'"
+
+  # --- Interface (Contract) ---
+  inputs:
+    type: object
+    description: "JSON Schema for skill parameters. Used by Planner & UI."
+    additionalProperties: 
+      type: object
+      properties:
+        type: {type: string, enum: [string, integer, boolean, array, object]}
+        description: {type: string}
+        default: {}
+        enum: {type: array}
+        required: {type: array, items: {type: string}}
+  
+  # --- Dependencies ---
+  depends_on:
+    type: array
+    items: {type: string}
+    description: "List of Skill IDs that MUST be executed before this one."
+  
+  provides:
+    type: array
+    items: {type: string}
+    description: "Capabilities provided (e.g. 'nextjs_app_router', 'prisma_client'). Used for capability matching."
+
+  # --- Execution ---
+  template_dir:
+    type: string
+    default: "templates"
+    description: "Relative path to Jinja2 templates root."
+  
+  entrypoint:
+    type: string
+    default: "hooks.py"
+    description: "Python module with hooks (pre_render, post_render, validate)."
+  
+  # Commands to run AFTER files are written (in Sandbox shell)
+  post_scripts:
+    type: array
+    items: {type: string}
+    description: "e.g. 'pnpm install', 'pnpm run format', 'prisma generate'"
+    default: []
+  
+  # Environment variables needed for post_scripts
+  env:
+    type: object
+    additionalProperties: {type: string}
+    default: {}
+
+  # --- Validation (Quality Gates specific to this skill) ---
+  validation:
+    type: array
+    items: {type: string}
+    description: "Commands that MUST pass for skill to be considered successful."
+    default: []
+    examples:
+      - "pnpm run typecheck"
+      - "pnpm run lint --max-warnings=0"
+      - "test -f prisma/schema.prisma"
+
+  # --- Output Metadata (for downstream skills/agents) ---
+  outputs:
+    type: object
+    description: "Structured data returned to State for other skills."
+    additionalProperties: {type: string}
+    example:
+      nextjs_version: "14.2.0"
+      package_manager: "pnpm"
+      router_type: "app_router"
+
+  # --- Compatibility ---
+  compatible_verticals:
+    type: array
+    items: {type: string}
+    description: "Vertical IDs this skill works with. Empty = all."
+    default: []
+  
+  min_kernel_version:
+    type: string
+    default: "1.0.0"

@@ -1,0 +1,68 @@
+"use client";
+
+{% if enum_imports %}import { {{ enum_imports | join(", ") }} } from "@prisma/client";
+{% endif %}import { useState } from "react";
+
+import { api } from "@/trpc/react";
+
+const inputClass = "rounded-md border border-input bg-background px-3 py-2";
+
+export function {{ component }}() {
+  const utils = api.useUtils();
+  const [error, setError] = useState<string | null>(null);
+  const list = api.{{ router_name }}.list.useQuery();
+  const onError = (e: { message: string }) => setError(e.message);
+  const onSuccess = () => utils.{{ router_name }}.list.invalidate();
+  const create = api.{{ router_name }}.create.useMutation({ onSuccess, onError });
+  const update = api.{{ router_name }}.update.useMutation({ onSuccess, onError });
+  const remove = api.{{ router_name }}.delete.useMutation({ onSuccess, onError });
+
+  function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
+    create.mutate(
+      {
+{% for f in fields if f.value %}
+        {{ f.name }}: {{ f.value }},
+{% endfor %}
+      },
+      { onSuccess: () => formEl.reset() },
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-6">
+      <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-lg border p-4 sm:max-w-xl">
+        <h2 className="text-lg font-semibold">New {{ model_name | lower }}</h2>
+{% for f in fields if f.input %}
+        {{ f.input }}
+{% endfor %}
+        <button type="submit" disabled={create.isPending}
+          className="self-start rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50">
+          {create.isPending ? "Saving..." : "Add"}
+        </button>
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      </form>
+
+      {list.isLoading ? <p className="text-muted-foreground">Loading...</p> : null}
+      {list.data && list.data.items.length === 0 ? (
+        <p className="text-muted-foreground">Nothing here yet.</p>
+      ) : null}
+      <ul className="flex flex-col divide-y rounded-lg border">
+        {list.data?.items.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-center gap-4 p-4">
+{% for f in fields if f.display %}
+            {{ f.display }}
+{% endfor %}
+            <button type="button" onClick={() => remove.mutate({ id: item.id })}
+              className="ml-auto rounded-md border border-input px-3 py-1 text-sm hover:bg-accent">
+              Delete
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

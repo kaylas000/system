@@ -1,0 +1,10 @@
+import { LoginForm } from "@/components/auth/login-form";
+
+export default function LoginPage({ searchParams }: { searchParams: { callbackUrl?: string } }) {
+  const callbackUrl = searchParams.callbackUrl?.startsWith("/") ? searchParams.callbackUrl : "/dashboard";
+  return (
+    <main className="container flex min-h-screen items-center justify-center">
+      <LoginForm callbackUrl={callbackUrl} />
+    </main>
+  );
+}

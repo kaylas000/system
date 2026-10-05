@@ -1,0 +1,58 @@
+# SaaS Web verification gates (from specs/05_vertical_saas_web/verification/GATES.yaml, corrected).
+# Changes vs spec (ISSUES V-xx):
+#  * commands use `npm run` / `npx --no-install`: they work for pnpm- and npm-installed projects alike;
+#  * gates for tools that are not in the stack (test:contract, playwright, semgrep, next-bundle-analyzer)
+#    are not included; docker_build runs in the generated CI (no docker daemon in the sandbox, A-14);
+#  * `prisma generate` is a skill post_script, not a gate;
+#  * tasks get: runs_on_every_task gates + gates whose tags intersect the task's skill tags + skill:<id>;
+#    the final (project-level) verification runs every gate with severity "error".
+gates:
+  - id: lint_ts
+    name: "ESLint (next lint)"
+    description: "next lint with zero warnings"
+    command: "npm run lint --silent"
+    runs_on_every_task: true
+    timeout_sec: 180
+    parser: parse_eslint
+    severity: error
+
+  - id: typecheck_ts
+    name: "TypeScript type check"
+    description: "tsc --noEmit (strict)"
+    command: "npm run typecheck --silent"
+    runs_on_every_task: true
+    timeout_sec: 240
+    parser: parse_tsc
+    severity: error
+
+  - id: prisma_validate
+    name: "Prisma schema validation"
+    command: "npx --no-install prisma validate"
+    tags: [prisma, database]
+    timeout_sec: 60
+    parser: parse_prisma
+    severity: error
+
+  - id: test_unit
+    name: "Unit tests (Vitest)"
+    command: "npm run test:unit --silent"
+    tags: [test, trpc, backend]
+    timeout_sec: 300
+    parser: parse_vitest
+    severity: error
+
+  - id: build_nextjs
+    name: "Next.js production build"
+    command: "npm run build --silent"
+    tags: [docker, deployment, ci]
+    timeout_sec: 900
+    exclusive: true   # rewrites .next/ (tsc reads .next/types) -> never in parallel
+    parser: parse_nextjs_build
+    severity: error
+
+  - id: security_audit
+    name: "Dependency audit"
+    command: "npm audit --omit=dev --audit-level=high"
+    tags: [security]
+    timeout_sec: 120
+    severity: warning

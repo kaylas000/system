@@ -1,0 +1,190 @@
+# ISSUES — дефекты ТЗ, пробелы и принятые решения
+
+`TECHNICAL_SPECIFICATION.md` и файлы в `specs/` хранятся **дословно**. Все исправления делаются в коде реализации; здесь зафиксировано, *что* в ТЗ не так и *какое решение* принято.
+
+Статусы: **fixed** — исправлено в реализации; **open** — будет исправлено в соответствующей фазе; **decision** — проектное решение/отклонение от ТЗ.
+
+Синтаксические проблемы воспроизводятся командой `python scripts/lint_specs.py`.
+
+---
+
+## 1. Синтаксис (проверено `scripts/lint_specs.py`)
+
+| ID | Файл(ы) | Проблема | Статус |
+|---|---|---|---|
+| S-01 | 16 файлов частей 3–7: `03_skills/registry/VERTICAL_LOADER.py`, `04_knowledge/cli/INGEST_CLI.py`, `04_knowledge/ingestion/{ENRICHMENT,INGESTION_PIPELINE}.py`, `04_knowledge/retrieval/{RERANKING,RETRIEVAL_STRATEGIES}.py`, `04_knowledge/storage/KUZU_CLIENT.py`, `05_vertical_saas_web/VERTICAL_IMPL.py`, `05_vertical_saas_web/evals/RUN_EVALS.py`, `05_vertical_saas_web/skills/add_trpc_router/hooks.py`, `05_vertical_saas_web/verification/PARSERS.py`, `06_ops/cost_control/BUDGET_MANAGER.py`, `06_ops/hitl/HITL_API.py`, `07_gateway/auth/AUTH_MANAGER.py`, `07_gateway/orchestrator/CROSS_VERTICAL.py`, `07_gateway/router/CLASSIFIER.py` | `from typing: ...` вместо `from typing import ...` — `SyntaxError` | fixed (фазы 3–7): все 16 файлов перенесены в код с исправлением; сами спеки не меняются |
+| S-02 | `06_ops/ci_cd/KERNEL_CI.yml:38`, `06_ops/ci_cd/GENERATED_PROJECT_CI.yml:29` | `with: { python-version: ${{ env.X }} }` — `${{` внутри flow-mapping YAML невалиден | fixed: `ci/kernel-ci.yml` и шаблон скилла `add_github_actions_ci` написаны без этой ошибки; спеки не меняются |
+| S-03 | `01_kernel/protocols.py` | `Literal` используется без импорта | fixed (`kernel/protocols.py`) |
+
+## 2. Kernel (часть 1) — решения фазы 1
+
+| ID | Где в ТЗ | Проблема | Решение | Статус |
+|---|---|---|---|---|
+| K-01 | `state.py` `TokenUsage` | `model_name` обязателен → `TokenUsage()` падает; `calculate_total_tokens` содержит мёртвый код | `model_name=""` по умолчанию; `add()` объединяет имена моделей через `+` | fixed |
+| K-02 | `state.py` `AgentState` | Нет `sandbox_id`, хотя его читают `TOOL_REGISTRY.py` и вертикаль | Поле `sandbox_id` добавлено | fixed |
+| K-03 | `state.py` | Нет полей для HITL-протокола | Добавлены `interrupt_type`, `human_decision`, `next_after_human`, `failed_node`, enum `InterruptType` | fixed |
+| K-04 | `state.py` | `datetime.now()` без таймзоны | `utcnow()` (UTC) | fixed |
+| K-05 | `state.py` / `graph_topology.md` | `validate_dag` — заглушка | Алгоритм Кана: дубли, неизвестные зависимости, self-dep, циклы | fixed |
+| K-06 | `ARCHITECTURE.md` vs `protocols.py` | Расположение протоколов: `kernel/protocols.py` vs `kernel/vertical/protocols.py` | Основной файл `kernel/protocols.py`; `kernel/vertical` реэкспортирует | decision |
+| K-07 | `protocols.py` `ISandbox.exec(stream=True)` | Параметр противоречит возвращаемому `CommandResult` | Убран; стриминг — отдельный метод в фазе 2 | decision |
+| K-08 | `protocols.py` `VerticalManifest` | Поля (skills/verifier) не совпадают с `05_vertical_saas_web/MANIFEST.yaml` | Модель повторяет формат `MANIFEST.yaml`, `extra="allow"` | decision |
+| K-09 | `protocols.py` `IVertical` | Нет `get_fixer_prompt`, хотя `VERTICAL_IMPL.py` его реализует и Fixer он нужен | Метод добавлен в протокол | fixed |
+| K-10 | `protocols.py` `LLMResponse`, `IVertical.finalize` | Нет поля для structured output; `finalize` не возвращает изменения state | `LLMResponse.parsed`; `finalize` возвращает частичный dict | decision |
+| K-11 | `graph_topology.md` `routing.py` | Роутеры мутируют `state` (LangGraph такие записи теряет); `route_get_next_task` возвращает `"human_review"`, которого нет в `Literal` | Роутеры — чистые функции, все изменения state в узлах | fixed |
+| K-12 | `graph_topology.md` | Не описано условное ребро из `human_review`; нет ребра coder→human_review | См. раздел 2.1 | decision |
+| K-13 | `ARCHITECTURE.md` `recursion_limit: 50` | При 25 задачах и циклах verify→fix лимит исчерпывается | `kernel.recursion_limit = 100` | decision |
+| K-14 | — | Пути `FileChange` от LLM не проверяются (`../../etc/passwd`, абсолютные) | `sanitize_changes()` в узлах + проверка выхода из корня в `LocalSandbox` | fixed |
+| K-15 | langgraph-checkpoint 4.x | Десериализация незарегистрированных типов из чекпойнта: предупреждение, в будущем — блокировка | `kernel/persistence/serde.py`: явный allowlist всех типов state; тесты используют его, пропущенный тип ломает CI | fixed |
+
+### 2.1 Отклонения от топологии графа (K-12)
+
+- Каждый узел, кроме `human_review`, обёрнут: необработанное исключение → `interrupt_type=node_error`, `failed_node=<узел>` → `human_review`. Действие `retry` перезапускает упавший узел.
+- `skip_gate` помечает текущую задачу `SKIPPED` и ведёт в `get_next_task` (в ТЗ — в `verifier`, что приводило бы к повторному провалу). Зависимые задачи считают `SKIPPED` выполненной.
+- `retry`/`edit` после `gate_failure` сбрасывают бюджет исправлений задачи (`retry_count=0`) и ведут в `verifier`.
+- План: `approve`/`edit` → `get_next_task`; `reject`/`retry` → `planner` с комментарием человека в промпте. Отредактированный план проходит `validate_dag`; невалидная правка отклоняется, граф продолжает ждать.
+- Недопустимое для данного `interrupt_type` действие не меняет состояние — граф снова ждёт решения.
+- Project-level гейты (`get_verification_gates(state, None)`) пока не вызываются — подключаются вместе с вертикалью SaaS Web.
+- Зависимости (vertical, llm, sandbox, settings, tool_registry) передаются через `config["configurable"]` или умолчания `build_graph(...)`, а не через глобальные объекты.
+
+## 3. Infra (часть 2)
+
+| ID | Где | Проблема | Статус |
+|---|---|---|---|
+| I-01 | `02_infra/tools/TOOL_REGISTRY.py` | Ссылается на неопределённый `SandboxManager`; импортирует `AgentState` из `kernel.protocols` | fixed (`kernel/tools/registry.py`: `sandbox_manager` необязателен) |
+| I-02 | `02_infra/sandbox/SANDBOX_MANAGER.py` | `E2BSandbox` не соответствует протоколу `ISandbox` (методы без `sandbox_id`, `create` — classmethod) | fixed (`kernel/sandbox/e2b.py`: один объект на все песочницы, словарь `id → AsyncSandbox`) |
+| I-03 | часть 2 | Нет файлов `PROVIDERS.md`, `COST_TRACKER.py` | `COST_TRACKER` — написан агентом (`kernel/llm/cost_tracker.py`, в ТЗ отсутствует); `PROVIDERS.md` — open |
+| I-04 | `02_infra/llm_gateway/LLM_CLIENT.py` | Стоимость и usage берутся из приватного `_raw_response` Instructor; глобальный `settings`; `gateway_url` обязателен | fixed (`kernel/llm/litellm_client.py`): структурированный вывод без Instructor — JSON Schema в промпте + `response_format`, если модель поддерживает, + валидация pydantic и повтор с текстом ошибки (`llm.max_structured_retries`); usage и стоимость суммируются по всем попыткам; `llm.gateway_url = None` → прямые провайдеры |
+| I-05 | `02_infra/llm_gateway/LLM_CLIENT.py` | `estimate_tokens` падает без сети (tiktoken качает кодировки) | fixed: откат на оценку «4 символа = 1 токен» |
+| I-06 | часть 1/2 | `InterruptType.BUDGET_EXCEEDED` объявлен, но нигде не выставляется; в `human_review` для него только `abort` | fixed: обёртка узла в `kernel/graph/builder.py` после каждого узла сравнивает `token_usage` с `max_budget_usd` и `llm.max_tokens_per_run`; `approve` с `edited_data.max_budget_usd` / `max_tokens_per_run` продолжает run по роутеру узла, на котором сработал лимит (`routing.ROUTERS`) |
+| I-07 | `SANDBOX_MANAGER.py::E2BSandbox` | Используются несуществующие в e2b v2 API: `env_vars=`, `files.write_bytes`, `download`, `close`; tar-архив пишется как один файл; ненулевой exit code в e2b — исключение, в ТЗ не обработано; `timeout` в e2b — время жизни песочницы, а не команды | fixed (`kernel/sandbox/e2b.py`, API сверен с e2b 2.51): `AsyncSandbox.create(template, timeout, envs, metadata)`, `files.write_files`, `CommandExitException` → `CommandResult`, `download_dir` через `tar` + `files.read(format="bytes")`; `SandboxSpec.image` → шаблон E2B через `sandbox.e2b_template_map` |
+| I-08 | `SANDBOX_MANAGER.py::SandboxManager` | `acquire()` как контекстный менеджер не подходит графу (песочница живёт между узлами и паузами HITL); тёплое переиспользование песочниц между run переносит файлы и секреты; при исчерпании пула — сразу ошибка; провайдер захардкожен (`TODO: Factory`) | fixed (`kernel/sandbox/manager.py`): менеджер сам реализует `ISandbox`, квота через семафор с ожиданием, TTL по последнему обращению, `stop()` закрывает всё, без переиспользования; фабрика `create_sandbox(settings)` для `e2b` / `docker` / `local`. Добавлен `DockerSandbox` (docker CLI). Daytona не реализован |
+| I-09 | `02_infra/tools/FILESYSTEM_TOOL.py` | `sandbox_manager.get_sandbox()` не существует; `args.pop` мутирует вход; запись в `state` (LangGraph её отбрасывает); shell-инъекция в glob/grep (`'{pattern}'`); `find -name` не понимает `**/`; `rg` может отсутствовать; пути не ограничены workspace; режим `update` объявлен, но не реализован | fixed (`kernel/tools/filesystem.py`): `ISandbox`, хэш в `metadata["sha256"]`, glob через разбор листинга `find` в Python (с `**`, `{a,b}`), grep через `grep -rHInE -e <quoted>`, все пути внутри workspace; `create` не перезаписывает, `update` требует существующий файл |
+| I-10 | `02_infra/tools/SHELL_TOOL.py` | Allowlist не применяется (`_is_dangerous` всегда `False`); denylist — поиск подстроки; таймаут через `asyncio.wait_for` оставляет процесс работать в песочнице | fixed (`kernel/tools/shell.py`): `ShellPolicy` проверяет первое слово каждой команды в цепочке, запрещает `$(...)` и обратные кавычки при включённом allowlist, denylist — регулярные выражения; таймаут передаётся в `ISandbox.exec`. Это защита от ошибок LLM, не граница безопасности |
+| I-11 | `02_infra/tools/GIT_TOOL.py` | Аргументы и сообщение коммита подставляются в строку команды (инъекция); `push` доступен агенту без HITL; путь `/workspace` захардкожен | fixed (`kernel/tools/git.py`): `shlex.quote`, запрет `-c`, `--exec`, `--upload-pack`, `--output` и т. п.; `push` только при `allow_push=True` |
+| I-12 | `02_infra/tools/LSP_TOOL.py`, `RAG_TOOL.py` | — | отложено: LSP — после вертикали, RAG — фаза 4 |
+
+## 4. Skills (часть 3)
+
+| ID | Проблема | Статус |
+|---|---|---|
+| SK-01 | Упомянуты, но не даны: `MARKETPLACE_CLIENT.py`, `tsconfig.json.j2`, `layout.tsx.j2`, `DEFAULT_VERTICAL.py` (`GenericVertical`) | `GenericVertical` — написан агентом (`kernel/skills/generic_vertical.py`); `prompts/compiler.py` — написан агентом (`kernel/prompts/compiler.py`); шаблоны — фаза 5; marketplace — open |
+| SK-02 | `ISkillExecutor.execute` в ядре возвращал только `list[FileChange]`, в `SKILL_EXECUTOR.py` — dict с outputs; state не передавался, `skill_output()` в шаблонах не работал | fixed: `SkillResult` (file_changes, outputs, metadata), параметр `state`; outputs сохраняются в `state["skill_outputs"]` |
+| SK-03 | `MANIFEST_SCHEMA.yaml` — схема для skill.yaml, но в `SKILL_DEFINITION.py` поля называются иначе (`inputs_schema`/`outputs_schema` вместо `inputs`/`outputs`) — входная схема и outputs терялись | fixed: `kernel/skills/definition.py` читает `inputs`/`outputs` |
+| SK-04 | `SKILL_DEFINITION.py`: хуки объявлены полями `_pre_render` и т. п.; pydantic считает имена с `_` приватными, `cls(**data, **hooks)` их молча отбрасывает — хуки не вызывались никогда. Дефолты из JSON Schema не применялись, а шаблоны на них рассчитаны | fixed: `PrivateAttr`, проверка `async def`, `apply_schema_defaults` перед валидацией |
+| SK-05 | `TEMPLATE_ENGINE.py`: `workspace_root` (путь внутри песочницы) добавлялся в локальный загрузчик шаблонов, create/update определялись `Path.exists()` на хосте; `env()` давал шаблонам доступ к окружению оркестратора (утечка секретов в код); шаблоны примеров вызывают `snake_case(x)` как функцию, а она зарегистрирована только как фильтр | fixed: `kernel/skills/templates.py` — SandboxedEnvironment, фильтры также как globals, без `env()`, `{{ }}` в путях с проверкой выхода за workspace; create/update проверяет executor одной командой в песочнице |
+| SK-06 | `SKILL_EXECUTOR.py`: `sandbox.write_files(file_changes)` без `sandbox_id`; `StrictUndefined` без импорта; outputs возвращались сырыми шаблонами; упавший post_script игнорировался; validation выполнялась один раз внутри executor — после исправления фиксером не перепроверялась | fixed: `kernel/skills/executor.py`; упавший post_script → `SkillExecutionError` (→ NODE_ERROR → человек); validation — отдельный гейт `SkillValidationGate`, перезапускается после каждого исправления |
+| SK-07 | `SKILL_REGISTRY.py`: в алгоритме Кана in-degree считался у зависимости, а не у зависимого — порядок получался обратным (зависимые раньше зависимостей); неизвестная зависимость → `KeyError`; ошибки загрузки — `print` | fixed: `kernel/skills/registry.py` |
+| SK-08 | `VERTICAL_LOADER.py`: `from typing: Dict` (S-01); абсолютные пути хоста записывались в manifest (попадают в checkpoint); одна битая вертикаль роняла `discover`; `VerticalImpl` получал только manifest, а `SaaSWebVertical` в части 5 ожидает `(manifest, tool_registry, skill_registry)` | fixed: `kernel/skills/loader.py`, единая сигнатура `VerticalImpl(manifest, vertical_dir, tool_registry=...)` = `GenericVertical` |
+| SK-09 | `HOOKS.py`: `lsp_add_import` вставлял импорт в начало файла, `tree_sitter_edit` возвращал `None` | fixed частично: `kernel/skills/hooks.py` — детерминированные текстовые правки (`add_import`, `insert_after_marker`); LSP/tree-sitter — после LSP-инструмента |
+| SK-10 | Примеры `examples/*/hooks.py` импортируют `..SKILL_DEFINITION` относительным импортом из не-пакета | в коде вертикали хуки импортируют `kernel.skills` |
+| SK-11 | Ядро: `documenter` только вызывал `vertical.finalize`, README/ARCHITECTURE никто не писал | fixed: при наличии `vertical.get_documenter_prompt` документер пишет `.md` через LLM (`kernel.generate_docs`); ошибка документации не роняет run |
+| SK-12 | Ядро: если у гейта нет парсера, `files_to_fix` пуст и фиксер не видел ни одного файла | fixed: фиксер берёт файлы текущей задачи |
+
+## 5. Knowledge (часть 4)
+
+| ID | Где | Проблема | Статус |
+|---|---|---|---|
+| KN-01 | часть 4 | Нет `EMBEDDING.py`, `HYBRID_SEARCH.py`, `GRAPH_TRAVERSAL.py` | fixed (написано агентом): `kernel/knowledge/ingestion/embedding.py`, гибридный поиск — `storage/qdrant_store.py::hybrid_search`, обход графа — `storage/graph_store.py` |
+| KN-02 | `ingestion/PARSERS.py` | `tree_sitter_languages` несовместим с `tree-sitter>=0.22`; queries-API меняется между версиями | fixed: грамматики из пакетов `tree-sitter-typescript/-python/-go`, обход дерева без queries — `kernel/knowledge/ingestion/parsers.py` (TS/TSX/JS, Python, Go) |
+| KN-03 | `storage/KUZU_CLIENT.py`, README | Kuzu заархивирован 2025-10-10 (read-only, релизов больше не будет); `MERGE` со всеми свойствами; у `Symbol` нет `file_path`, а запросы по нему фильтруют | fixed: граф на SQLite (stdlib) с той же схемой меток/связей и рекурсивными CTE — `storage/graph_store.py`, протокол `IGraphStore` для Neo4j/FalkorDB; граф репо пересобирается атомарно (`replace_repo`) |
+| KN-04 | `CHUNKING_STRATEGIES.py` | `RetrievalChunk.graph_edges = []` — мутабельный default у dataclass (`ValueError` при импорте), `Tuple` не импортирован; используется `SymbolType.CALL`, которого нет | fixed: pydantic-модели `kernel/knowledge/models.py` |
+| KN-05 | `CHUNKING_STRATEGIES.py` | Импорты/вызовы не резолвятся (`import:<name>`, `call:<name>` — заглушки) → в графе нет рёбер между реальными символами | fixed: резолв относительных, `@/`/tsconfig `paths`, Python-модулей, Go-пакетов; вызовы — тот же файл → импортированные имена → уникальный экспорт — `ingestion/chunking.py` |
+| KN-06 | `QDRANT_CLIENT.py` | ID точек — строки (`repo#file#symbol#line`); Qdrant принимает только UUID/uint; `client.search` устарел; sparse/BM25 не настроен; индекс `text` на `file_path` не даёт префиксного фильтра | fixed: `uuid5(chunk_id)` + `payload.chunk_id`; `query_points` с prefetch dense+sparse и RRF; sparse `bm25` с `Modifier.IDF`; префиксы путей — keyword-поле `path_prefixes` |
+| KN-07 | `ENRICHMENT.py` | Один LLM-вызов на чанк; при ошибке — фиктивные `intent="Unknown"` и т.п. (засоряют фильтры); `settings.llm.enrichment_model` не существует | fixed: несколько чанков на вызов (`items_per_call`), при ошибке `enriched=False`, модель — `knowledge.enrichment_model` |
+| KN-08 | `INGESTION_PIPELINE.py` | Мутабельные defaults у dataclass; глобальные клиенты внутри конструктора; `_embed` возвращает нули; нет инкрементальности | fixed: зависимости инжектятся; эмбеддинги — `litellm.aembedding` или офлайн `HashingEmbedder`; векторы обновляются только для изменённых файлов (hash), удалённые файлы вычищаются |
+| KN-09 | `RETRIEVAL_STRATEGIES.py` | Фильтр `language == tech_stack.language` (`"typescript@5"`) никогда не совпадает с payload (`"typescript"`); `query_callers` вызывается без `await`; `search_by_symbol` не определён | fixed: область поиска — `manifest.rag_collections` ∩ проиндексированные репо (иначе вся база), язык — буст в реранкере; стратегии coding/planning/fixing — `retrieval/engine.py` |
+| KN-10 | `cli/INGEST_CLI.py` | `reindex` и `delete` — «Not implemented in spec»; источников для `reindex` в манифесте нет | fixed: `autogen-knowledge ingest/reindex/search/callers/stats/delete`; `reindex` читает необязательный `knowledge_sources` манифеста |
+| KN-11 | README §2 | `Dockerfile.knowledge` | fixed (фаза 6): `deploy/docker/Dockerfile.knowledge`; сборка образа — в CI (в среде разработки нет Docker) |
+
+## 6. Вертикаль SaaS Web (часть 5)
+
+| ID | Где | Проблема | Статус |
+|---|---|---|---|
+| V-01 | `skills/add_trpc_router/skill.yaml:10` | `depends_on: [init_trpc_setup, ...]` — такого скилла нет ни в `MANIFEST.yaml`, ни в `CATALOG.md` | fixed: скилл `init_trpc_setup` из addenda v2 §M (с исправлениями A-06/A-07) — `verticals/saas_web/skills/init_trpc_setup` |
+| V-02 | `CATALOG.md` / `README.md` vs `MANIFEST.yaml` | `init_prisma` vs `init_prisma_postgres`, `add_trpc` vs `add_trpc_router` — разные имена одного скилла | fixed: в `verticals/saas_web` только полные имена из `MANIFEST.yaml` |
+| V-03 | `verification/PARSERS.py:165` | `parser(self, result)` для функций с одним аргументом → `TypeError` | fixed: `verticals/saas_web/verification/parsers.py` — модульные функции + `PARSERS` |
+| V-04 | `verification/PARSERS.py:117,129,145` | `result.files_to_fix.add(...)` у `list` → `AttributeError` | fixed (там же; `VerificationGateResult` frozen → `model_copy`) |
+| V-05 | часть 5 | Из 10 скиллов дан только `add_trpc_router`; нет промптов `FIXER.j2`, `REVIEWER.j2`, `DOCUMENTER.j2`; упомянуты, но не даны `prompts/compiler.py`, `prompts/examples/planner_saas.jsonl` | частично: 10 скиллов в `verticals/saas_web/skills` (из addenda с A-xx или написаны агентом — указано в шапке каждого `skill.yaml`); FIXER/DOCUMENTER — kernel defaults; `compiler.py` — `kernel/prompts/compiler.py`; REVIEWER (узла нет в графе) и few-shot jsonl — open. Stripe, admin, Playwright, Sentry, rate limiting, feature flags, env validation — не реализованы (open) |
+| V-06 | `PARSERS.py` | Регулярки не совпадают с реальным выводом: tsc печатает `file(line,col): error TSxxxx`, `next lint` — формат stylish, не JSON | fixed: парсеры проверены на реальном выводе (e2e) и в `tests/verticals` |
+| V-07 | `GATES.yaml` | `pnpm run test:contract`, Playwright, semgrep, `next-bundle-analyzer` — таких скриптов/инструментов нет в стеке; `prisma generate` как гейт | fixed: в `verticals/saas_web/verification/GATES.yaml` только исполнимые гейты; команды через `npm run`/`npx --no-install` (работают и для pnpm-проектов) |
+| V-08 | `GATES.yaml` + ядро | Гейты задачи запускаются параллельно; `next build` переписывает `.next/`, а `tsc` в это время читает `.next/types` → ложные TS6053 (воспроизведено в e2e) | fixed: `exclusive: true` у `build_nextjs`, `verifier.run_gates` запускает такие гейты после остальных, по одному |
+| V-09 | `add_trpc_router/templates/router.ts.j2` | `ctx.db.{{ model_name }}` (Prisma-делегат в camelCase: `ctx.db.todo`); лишний импорт `prisma` из `@/server/db`; проверки владельца оставлены как TODO; `z.string().nonempty()` (заменено на `.min(1)`) | fixed: делегат в camelCase, `ctx.db`, фильтр/проверка `userId` для моделей с владельцем, поля выводятся из `schema.prisma` |
+| V-10 | `VERTICAL_IMPL.py` | Регистрация роутера в `on_task_complete` через поиск `mergeRouters(` (в tRPC 11 root его нет) | fixed: регистрация в хуке скилла в том же наборе изменений (`verticals/saas_web/lib/trpc.py`); `VERTICAL_IMPL.py` не нужен — вертикаль работает на `GenericVertical` |
+| V-11 | ядро (coder) | Свободный кодер (LLM) не видел содержимого файлов проекта — только список путей из `project_files` | fixed: дерево файлов из песочницы + содержимое `manifest.coder.context_files` и путей, упомянутых в задаче (`open_files`, как в спец. `CODER.j2`) |
+| V-12 | ядро | Project-level гейты (`get_verification_gates(state, None)`) нигде не вызывались | fixed: packager выполняет их последовательно, результат — `quality_report.final_verification` (не блокирует: все гейты задач уже прошли); `kernel.final_verification` |
+| V-13 | сеть песочницы разработки | `binaries.prisma.sh` недоступен из этой среды → `prisma generate` падает | среда разработки: `scripts/e2e_saas_skills.py --fake-prisma-engines`; в E2B/Docker-песочнице движки скачиваются штатно |
+
+## 7. Ops (часть 6)
+
+| ID | Где | Проблема | Статус |
+|---|---|---|---|
+| O-01 | `ci_cd/GENERATED_PROJECT_CI.yml` | Шаблон проходит через Jinja: `${{ github.* }}` надо экранировать | fixed (фаза 5): скилл `add_github_actions_ci` экранирует `{{ '{{' }}` |
+| O-02 | `cost_control/BUDGET_MANAGER.py` | Двойной учёт: резерв оценки + фактическая стоимость; `sleep` под lock; смесь `time.time()` и `loop.time()`; `reset_run` пишет `0.0` в int; алерты через `print`; одно глобальное состояние на все run | fixed: `kernel/llm/budget.py` — проверка до вызова по факту без резерва, контекст run через contextvar, ожидание rate limit без lock, алерты в webhook |
+| O-03 | `hitl/HITL_API.py:109` | `background_tasks.resume_graph(...)` не существует | fixed: `kernel/service/runs.py` (`RunManager.resume`, фоновая задача asyncio) |
+| O-04 | `hitl/HITL_API.py:162` | `Path` не импортирован | fixed (файл переписан: `kernel/api/hitl.py`) |
+| O-05 | `hitl/HITL_API.py:18` | `from kernel.config import settings` — в реализации `get_settings()` | fixed |
+| O-06 | `deployment/TERRAFORM/main.tf` | Не пройдёт `terraform validate`: не объявлены `module.rds_sg`, `module.redis_sg`, `module.elasticache_subnet_group` и переменные; однострочные блоки с двумя аргументами (`{ length = 32, special = false }` — ошибка разбора, стр. 125); инлайн-аргументы `aws_s3_bucket`, удалённые в провайдере v4+; нет выхода `module.eks.kubeconfig`; у модуля IRSA нет входа `role_map`; политики `SecretsManagerReadWrite` и `AmazonS3FullAccess` слишком широкие; EKS 1.28 и AMI AL2 сняты с поддержки; секрет `database-url` не содержит URL | fixed: `deploy/terraform/aws/`. `terraform validate/plan` здесь не запускались (реестр недоступен) — в CI (`deploy-lint`) |
+| O-07 | часть 6 | Нет 21 файла (MISSING_FILES #22–42) | fixed агентом, кроме `UI_COMPONENTS.md` (нет UI) — см. MISSING_FILES |
+| O-08 | `hitl/HITL_API.py` | Синхронный `PostgresSaver` вызывается через `aget_tuple`; прерывание читается из несуществующего `checkpoint.metadata["interrupts"]`; граф пересобирается с жёстко заданной вертикалью `saas_web` на каждый resume; формат решения `{"action","data"}` вместо `edited_data` ядра; CORS `*` | fixed: `RunManager` берёт прерывание из `StateSnapshot.tasks`, вертикаль — из состояния run, решение `{"action","comment","edited_data"}`; CORS выключен по умолчанию (`create_app(cors_origins=...)`) |
+| O-09 | `hitl/HITL_API.py` | Путь `POST /runs/{id}/approve` расходится с `07_gateway/api/OPENAPI_SPEC.yaml` (`POST /runs/{id}/interrupt`) | decision: оба пути, основной — из OpenAPI |
+| O-10 | `observability/OTEL_CONFIG.py` | Инструменты создаются при импорте до `setup_otel`; `active_runs` считается на уровне узла; `vertical` берётся из configurable; авто-инструментирование требует пакетов, которых нет в зависимостях | fixed: метрики — `prometheus_client` напрямую (`kernel/observability/metrics.py`, no-op без библиотеки), OTel — только трейсы; `runs_active` считает `RunManager` |
+| O-11 | `observability/GRAFANA_DASHBOARDS.json` | Запросы используют несуществующие метрики (`autogen_gate_status`, `autogen_run_duration_bucket`, `autogen_llm_cost_total`, `autogen_tool_errors_total`, метки `model_name`, `node_name`); «успешность run» считается по гейтам; тип панели `graph` устарел | fixed: `scripts/gen_grafana_dashboard.py` → `deploy/grafana/dashboards/autogen-ops.json`; тест сверяет метрики с кодом |
+| O-12 | `cost_control/MODEL_ROUTER.yaml` | Секция `general` вместо `general_settings`; `strategy: cost-optimized` — не стратегия LiteLLM и не тот ключ (`routing_strategy`); `cache` вне `litellm_settings`; fallbacks не заданы; `${VAR}` вместо `os.environ/VAR`; `master_key` открытым текстом; callback `kernel.cost_control.budget_callback` не существует; модели 2024 года | fixed: `deploy/litellm/config.yaml` + `scripts/check_litellm_config.py` (проверка через `litellm.Router`); бюджет считает ядро |
+| O-13 | `deployment/DOCKERFILE.kernel` | `uv==0.3.0` и `uv.lock`, которого нет; стадия runtime копирует `/app/kernel` из стадии, где есть только `pyproject.toml`; модуля `kernel.main` нет; build-essential в runtime | fixed: `deploy/docker/Dockerfile.kernel` (pip + `requirements-kernel.lock`), `kernel/main.py` (`serve`/`check`/`migrate`) |
+| O-14 | `deployment/HELM_CHART/values.yaml` | Внешние чарты перечислены в `values.yaml` (Helm их игнорирует — место в `Chart.yaml`); `KUZU_PATH` (Kuzu заменён, KN-03); `replicaCount: 3` + HPA при том, что run живут в памяти процесса; переменные окружения не совпадают с `kernel/config.py` | fixed: `deploy/helm/autogen-kernel/` — 1 реплика, env `AUTOGEN_*`, внешние сервисы отдельно |
+| O-15 | реализация | Запущенные run и события WebSocket живут в памяти одного процесса: несколько реплик ядра дадут resume или WebSocket не на том поде; дневной лимит бюджета хранится в SQLite на томе пода | open: нужна общая очередь, шина событий и хранилище usage (Redis/Postgres) — до этого 1 реплика |
+| O-16 | DoD части 6 | Helm в kind, `trivy`, `terraform plan` в среде разработки невозможны (нет Docker, реестры закрыты) | open: вынесены в CI (`kind-smoke`, `image` + Trivy, `deploy-lint`); `terraform plan` требует AWS-аккаунта |
+
+## 8. Gateway (часть 7)
+
+| ID | Где | Проблема | Статус |
+|---|---|---|---|
+| G-01 | `router/CLASSIFIER.py:127` | `method="fallback"` вне `Literal["rule","llm","capability","explicit"]` | fixed: `kernel/gateway/router.py` (`RoutingDecision.method` включает `fallback`) |
+| G-02 | `api/OPENAPI_SPEC.yaml:198` | `responses:` на верхнем уровне, вне `components`; у ответов 200 нет `description` | fixed: схема генерируется FastAPI (`GET /openapi.json`, тест); YAML спеки не используется |
+| G-03 | часть 7 | Нет: `ROUTES.py`, `MIDDLEWARE.py`, `WEBSOCKETS.py`, `ROUTER.py`, `CAPABILITY_MATCHER.py`, `CONTRACT_RESOLVER.py`, `DEPENDENCY_GRAPH.py`, `QUOTAS.py`, `API_KEYS.py`, `CONFIG.yaml` | fixed агентом — см. MISSING_FILES №43–52 |
+| G-04 | `router/CLASSIFIER.py` | Правила-регэкспы зашиты в код (новая вертикаль не маршрутизируется без правки кода); считаются совпавшие паттерны, а не слова; fallback всегда `saas_web`, даже если она не установлена; `await loader.discover()` у синхронного метода; явно указанная неизвестная вертикаль молча игнорируется; ответ LLM разбирается как свободный текст | fixed: `VerticalRouter` — ключевые слова из манифеста (`routing.keywords`, дополнение агента) + встроенный словарь, границы слов, ничья → capability → LLM (structured output `ClassifierOutput`, модель `router/classifier`) → fallback на `kernel.default_vertical`; неизвестная явная вертикаль → 400 |
+| G-05 | `auth/AUTH_MANAGER.py` | SHA-256 ключа обрезан до 32 символов; клиент Redis создаётся при импорте; счётчик concurrent с TTL 1 ч освобождается в dependency — т.е. сразу после ответа на `POST /generate`, а не по окончании run; нет RBAC, нет выпуска и отзыва ключей, нет проверки `exp`/`iss` у JWT | fixed: `kernel/gateway/auth.py` + `store.py` — полный SHA-256, SQLite-хранилище ключей, `python -m kernel.main keys create/list/revoke` и `token`; JWT: HS256 / PEM / JWKS, обязательные `exp` и `sub`; RBAC viewer < developer < admin; лимиты rpm / rpd / concurrent по тарифу (память или Redis), слот concurrent освобождается хуком `RunManager` при остановке исполнения (done / error / HITL-пауза / cancel) |
+| G-06 | `orchestrator/CROSS_VERTICAL.py` | План зашит в код (вертикали `py_fastapi_microsvc`, `iac_terraform` не существуют); топосортировки нет («assume ordered»), всё последовательно; `base_request.run_id` не существует; `graph.ainvoke(request.model_dump())` вместо состояния; импорты `kernel.vertical.loader`, `kernel.graph.builder` не совпадают с кодом; контракты вставляются в промпт как YAML; glue-файлы — заглушки; нет HITL и отмены | fixed: `kernel/gateway/composer.py` — план от LLM (`gateway.composer_model`, structured output, проверка: вертикали установлены и доступны, уникальные slug-имена, известные зависимости, нет циклов, пути контрактов под `shared/`), уровни DAG параллельно, подпроекты — обычные run с `parent_id`, контракты передаются как `context_files`, владелец контракта (`provides`) может его уточнить для следующих уровней, HITL подпроекта → `waiting_human`, отмена, агрегированный архив с README / ARCHITECTURE / docker-compose / Makefile |
+| G-07 | `cli/AUTOGEN_CLI.py` | URL WebSocket жёстко `ws://localhost:8000`; `websockets.connect(extra_headers=...)` — аргумент удалён в websockets ≥ 14; при отсутствии ключа шлётся заголовок `X-API-Key: None`; ожидаются события `log` с полями, которых сервер не шлёт | fixed: `kernel/gateway/cli.py` — SSE (`/v1/runs/{id}/events`, `/logs`), URL из `--url`/env/профиля, HITL-вопросы в терминале, `compose`/`composition`, `download`, профили `~/.config/autogen/config.yaml` |
+| G-08 | `api/OPENAPI_SPEC.yaml` | Нет списка run, отмены, скачивания артефакта, SSE-событий, композиций; заголовок `Idempotency-Key` из `GATEWAY_ARCH.md` не описан; `run_id` описан как `uuid`, а ядро выдаёт `run_<hex>`; путь `/logs` описан как SSE, а HITL-API части 6 отдаёт JSON | decision: источник правды — схема FastAPI; `/v1/runs/{id}/logs` отдаёт JSON или SSE по `Accept: text/event-stream`; `Idempotency-Key` для `/v1/generate` и `/v1/compositions` |
+| G-09 | `GATEWAY_ARCH.md` §4 | «`X-Tenant-ID` изолирует рабочие пространства, песочницы, базы знаний» | partial: тенант берётся из ключа/JWT, `X-Tenant-ID` только сверяется (403 при несовпадении); run и композиции видны только своему тенанту (404 чужим). Раздельные базы знаний и песочницы по тенантам не сделаны — open |
+| G-10 | `GATEWAY_ARCH.md` §2, §3 | gRPC/Protobuf для внутренних вызовов; `skaffold.yaml`; шаги «Contract Stabilization» и «Integration Tests» (`docker compose up` всех сервисов + контрактные тесты) | open: не сделано. Контракты фиксируются до генерации; интеграционные проверки выводятся чек-листом в README композиции |
+| G-11 | `MASTER_PROMPT.md`, фаза 7 | DoD: «SaaS with Billing API + Terraform → 3 Kernels run» требует вертикалей Python-сервиса и Terraform, их нет (есть только `saas_web`) | open: `tests/gateway/test_composition.py` проверяет композицию на фейковых вертикалях (3 подпроекта, 2 уровня, уточнённый контракт, архив) |
+| G-12 | `GATEWAY_ARCH.md` §1 | «Redis Token Bucket» | decision: фиксированные окна (минута / сутки UTC) — проще и достаточно для rpm/rpd; concurrent — sorted set со сроком жизни слота |
+| G-13 | реализация | Ключи API, реестр run и композиций — SQLite на томе пода; композицию ведёт задача asyncio в процессе: после рестарта незавершённые композиции помечаются `failed` (их run сохраняются в чекпойнтах) | open: вместе с O-15 (общая БД и очередь) |
+| G-14 | реализация | LLM-вызовы роутера и composer не учитываются в бюджете run (бюджет считает граф) | open |
+
+## 9. Общее
+
+| ID | Проблема | Статус |
+|---|---|---|
+| X-01 | Версии моделей и библиотек в ТЗ, вероятно, устарели (в окружении — langgraph 1.2, langchain-core 1.x). Реализация ориентируется на актуальные версии | decision |
+| X-02 | (Дефект реализации, найден агентом.) При `llm.gateway_url` модели `router/*` передавались в litellm без префикса провайдера → `BadRequestError: LLM Provider NOT provided`, то есть режим LiteLLM proxy не работал; стоимость вызовов через шлюз считалась как 0 (litellm не знает цен алиасов), и лимит в долларах не срабатывал. Исправлено: через шлюз модель уходит как есть (`openai/<id>`), алиасы `llm.model_aliases`, стоимость — из заголовков `X-OmniRoute-Response-Cost` / `x-litellm-response-cost`. Добавлена поддержка OmniRoute. Тест на реальном HTTP: `tests/kernel/test_openai_compatible_gateway.py` | fixed |
+
+## 10. Дополнения (`specs/addenda/`)
+
+### 10.1 `01_phase1_patch_v1.md` — заменён версией v2
+
+Дефекты v1 (подтверждены: пакеты проверены в реестре npm, остальное сверено с ТЗ): несуществующие `@radix-ui/react-button|input|textarea`, `@trivy/plugin`; `@hookform/resolvers/zod` как имя пакета; `tailwindcss-animate` не в зависимостях; `layout.tsx`/`providers.tsx` импортируют файлы будущих скиллов и неописанный псевдоним `~`; нет `output: 'standalone'` и папки `public`; `Role` в `seed.ts`; `from typing:` в хуках; несуществующие зависимости `init_trpc_setup`, `add_tailwind_content_paths`; deprecated `shadcn-ui`; категория `infra` вне схемы; `docker build` внутри песочницы; ложное утверждение, что `add_trpc_router/hooks.py` генерирует базу tRPC. Большая часть исправлена в v2.
+
+### 10.2 `02_phase1_patch_v2.md` — остающиеся дефекты
+
+| ID | Где | Проблема | Статус |
+|---|---|---|---|
+| A-01 | Q, R, S | Утверждается, что `FIXER.j2`, `DOCUMENTER.j2`, `COST_TRACKER.py`, `DEFAULT_VERTICAL.py`, `prompts/compiler.py` были выданы «в ответе №7». В части 7 ТЗ их нет (только имена в деревьях/манифесте), в присланных текстах тоже. **Файлы по-прежнему отсутствуют** | open |
+| A-02 | M `server.ts.j2` | Синтаксическая ошибка: `create({ … }),` → `)` без закрывающей `}` | open |
+| A-03 | M `server.ts.j2` | `getServerSession` не экспортируется из `next-auth` v5 (проверено в `next-auth@5.0.0-beta.32`); в v5 используется `auth()` | open |
+| A-04 | M `server.ts.j2` / I | Импорт `authOptions` из `@/lib/auth`: такого экспорта в `auth.ts.j2` нет, а сам файл создаёт `add_nextauth_credentials`, который **зависит** от `init_trpc_setup` → цикл, `typecheck` в `init_trpc_setup` упадёт | open |
+| A-05 | M `providers.tsx.j2` | `TRPCReactProvider` не экспортируется из `react.tsx.j2` (там `trpc` и `createTRPCClient`); нужно `trpc.Provider` | open |
+| A-06 | M | Нет обработчика `src/app/api/trpc/[trpc]/route.ts` — клиент стучится в `/api/trpc`, получит 404 | open |
+| A-07 | M `root.ts.j2` vs ТЗ `VERTICAL_IMPL.py` | `_update_root_router` в ТЗ ищет `mergeRouters({`, а `root.ts` использует `createTRPCRouter({})` → роутеры не регистрируются. В v2 утверждается, что метод ищет `createTRPCRouter({` — это не так, нужно исправить в реализации | open |
+| A-08 | J `auth.ts.j2` / A | `@auth/prisma-adapter` не в `package.json`; `Google` используется без импорта | open |
+| A-09 | J `middleware.ts.j2` | Middleware импортирует `auth` с Prisma-адаптером → Prisma в edge runtime; для NextAuth v5 нужен отдельный edge-совместимый `auth.config.ts` | open |
+| A-10 | J `login/page.tsx.j2` | `{% if error %}…{{ error }}` — Jinja выполняется при генерации, а `error` — состояние React: ошибка входа не будет показана. Импортирует компоненты shadcn, но скилл не зависит от `add_shadcn_ui` | open |
+| A-11 | K `components.json.j2` | Невалидный JSON: `"prefix: ""` | open |
+| A-12 | K, L, M `hooks.py` | Снова `from typing:` — `SyntaxError` | open |
+| A-13 | K | `bunx` — bun в образе не установлен (сработает только запасной `npx`); `shadcn@latest` не зафиксирован — поведение CLI меняется между версиями | open |
+| A-14 | N `GATES.yaml` | Gate `docker_build` в `GATES.yaml` ТЗ уже есть — дубль id; парсера `parse_docker_build` в `PARSERS.py` нет; поле `runs_in` никем не читается | open |
+| A-15 | O `DOCKERFILE.sandbox.base` | `uv pip install --system` на Ubuntu 24.04 падает (externally managed — проверено на Debian с тем же маркером); после `fnm install` `npm` не попадает в PATH того же `RUN`; node/cargo остаются в `/root` (недоступно пользователю `autogen`), `rust-analyzer` — симлинк в `/root`; `tsc` в HEALTHCHECK глобально не установлен | open |
+| A-16 | A `package.json.j2` vs ТЗ | Расходится с `03_skills/examples/init_nextjs_app_router/templates/package.json.j2` (vitest vs jest, версии); `packageManager` зашит как pnpm, хотя вход скилла допускает npm/yarn/bun | decision: берётся v2, `packageManager` из входа |
+| A-17 | O vs ТЗ `SANDBOX_API.md` | Два разных `DOCKERFILE.sandbox.*` (в ТЗ и в дополнении), разные теги образа (`my-registry/…:latest`, `ghcr.io/autogen/sandbox-base:v1`, в `MANIFEST.yaml` — `sandbox-saas-web:v2.1.0`) | decision в фазе 2 |

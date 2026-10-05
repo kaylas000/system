@@ -1,0 +1,203 @@
+# specs/07_gateway/api/OPENAPI_SPEC.yaml
+openapi: 3.0.3
+info:
+  title: AutoGen Platform API
+  version: 1.0.0
+  description: Unified API for Automated Project Generation
+  contact: { name: Platform Team, email: platform@autogen.dev }
+servers:
+  - url: https://api.autogen.dev/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Local Development
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    GenerateRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string, maxLength: 50000, description: "Natural language PRD" }
+        vertical_id: { type: string, description: "Explicit vertical (saas_web, py_fastapi, etc). Auto-detected if omitted." }
+        tech_stack_hints: { type: object, additionalProperties: { type: string } }
+        constraints: { type: array, items: { type: string } }
+        context_files: 
+          type: array
+          items: { type: object, properties: { name: {type: string}, content_base64: {type: string} } }
+        max_budget_usd: { type: number, minimum: 0.01, maximum: 100.0 }
+        webhook_url: { type: string, format: uri }
+    GenerateResponse:
+      type: object
+      properties:
+        run_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, completed, failed, needs_review] }
+        message: { type: string }
+        stream_url: { type: string, format: uri, description: "WebSocket for real-time logs" }
+        artifact_url: { type: string, format: uri, nullable: true }
+    RunStatus:
+      type: object
+      properties:
+        run_id: { type: string }
+        status: { type: string, enum: [queued, initializing, planning, coding, verifying, fixing, documenting, packaging, completed, failed, needs_review] }
+        progress: { type: number, format: float, minimum: 0, maximum: 1 }
+        current_node: { type: string, nullable: true }
+        current_task: { type: string, nullable: true }
+        logs: { type: array, items: { type: string } }
+        error: { type: string, nullable: true }
+        artifact: { $ref: '#/components/schemas/ArtifactMetadata' }
+    ArtifactMetadata:
+      type: object
+      properties:
+        project_name: { type: string }
+        vertical_id: { type: string }
+        git_commit_sha: { type: string }
+        artifact_url: { type: string }
+        quality_report: { type: object }
+        total_cost_usd: { type: number }
+        duration_seconds: { type: number }
+    InterruptPayload:
+      type: object
+      properties:
+        run_id: { type: string }
+        interrupt_type: { type: string, enum: [plan_review, gate_failure, destructive_action, budget_exceeded] }
+        payload: { type: object }
+        actions: { type: array, items: { type: string, enum: [approve, reject, edit, abort, skip_gate] } }
+    ApprovalRequest:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [approve, reject, edit, abort, skip_gate] }
+        edited_data: { type: object }
+        comment: { type: string }
+    VerticalInfo:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        version: { type: string }
+        tech_stack: { type: object }
+        key_skills: { type: array, items: { type: string } }
+    ErrorResponse:
+      type: object
+      properties: { detail: { type: string }, code: { type: string } }
+
+security: [ { BearerAuth: [] }, { ApiKeyAuth: [] } ]
+
+paths:
+  /generate:
+    post:
+      summary: Start a new project generation
+      operationId: createGeneration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerateRequest' }
+      responses:
+        '202':
+          description: Generation started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenerateResponse' }
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+              description: URL to poll for status (/runs/{run_id})
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /runs/{run_id}:
+    get:
+      summary: Get run status and artifact
+      operationId: getRunStatus
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { content: { application/json: { schema: { $ref: '#/components/schemas/RunStatus' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /runs/{run_id}/interrupt:
+    get:
+      summary: Get current interrupt payload (HITL)
+      operationId: getInterrupt
+      parameters: [ { name: run_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { content: { application/json: { schema: { $ref: '#/components/schemas/InterruptPayload' } } } }
+        '404': { description: "No active interrupt or run not found" }
+
+    post:
+      summary: Submit human approval/decision
+      operationId: submitApproval
+      parameters: [ { name: run_id, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalRequest' }
+      responses:
+        '200': { description: "Graph resumed" }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { description: "No active interrupt" }
+
+  /runs/{run_id}/logs:
+    get:
+      summary: Stream logs via Server-Sent Events (SSE)
+      operationId: streamLogs
+      parameters: [ { name: run_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /ws/runs/{run_id}:
+    get:
+      summary: WebSocket for real-time bidirectional communication
+      operationId: websocketRun
+      parameters: [ { name: run_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '101': { description: "Switching Protocols" }
+
+  /verticals:
+    get:
+      summary: List available verticals
+      operationId: listVerticals
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/VerticalInfo' } }
+
+  /verticals/{vertical_id}:
+    get:
+      summary: Get vertical manifest and capabilities
+      operationId: getVertical
+      parameters: [ { name: vertical_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { content: { application/json: { schema: { $ref: '#/components/schemas/VerticalInfo' } } } }
+
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200': { content: { application/json: { schema: { type: object, properties: { status: {type: string}, version: {type: string} } } } } }
+
+responses:
+  Error:
+    description: Error response
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ErrorResponse' }

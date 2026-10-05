@@ -1,0 +1,3 @@
+# apt pins break on every Debian point release; the base image tag is the pin.
+ignored:
+  - DL3008

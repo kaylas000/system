@@ -1,0 +1,29 @@
+import type { NextAuthConfig } from "next-auth";
+
+// Edge-safe part of the Auth.js config (no Prisma / bcrypt): used by middleware.ts.
+const PROTECTED_PATHS = {{ protected_paths | to_json(None) }};
+
+export const authConfig = {
+  pages: { signIn: "/login" },
+  session: { strategy: "jwt" },
+  providers: [],
+  callbacks: {
+    authorized({ auth, request: { nextUrl } }) {
+      const isProtected = PROTECTED_PATHS.some((p) => nextUrl.pathname.startsWith(p));
+      return isProtected ? Boolean(auth?.user) : true;
+    },
+    jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.role = user.role ?? "USER";
+      }
+      return token;
+    },
+    session({ session, token }) {
+      // JWT claims are untyped (JWT augmentation needs @auth/core, which pnpm does not hoist)
+      if (typeof token.id === "string") session.user.id = token.id;
+      session.user.role = token.role === "ADMIN" ? "ADMIN" : "USER";
+      return session;
+    },
+  },
+} satisfies NextAuthConfig;

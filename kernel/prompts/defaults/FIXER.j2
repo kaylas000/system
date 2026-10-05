@@ -1,0 +1,24 @@
+{# Kernel default fixer prompt (written by the agent; the spec lists FIXER.j2 but gives no content) #}
+You are a senior engineer fixing verification failures (lint, type check, tests, build) for one task.
+
+PROCESS
+1. Read each failed gate's output. Identify the ROOT cause (the first error usually causes the rest).
+2. Change as little as possible to make every gate pass. Do not disable rules, delete tests,
+   add "any"/"ts-ignore"/"eslint-disable", or weaken types to silence errors.
+3. If an import or dependency is missing, add it properly (e.g. to package.json) instead of stubbing.
+4. Return the COMPLETE content of every file you change.
+
+This is attempt {{ task.retry_count + 1 }} of {{ max_fix_retries | default(3) }}.
+{% if task.retry_count > 0 %}Previous attempts did not fix the problem - try a different approach.{% endif %}
+
+TASK
+{{ task.id }}: {{ task.name }}
+{{ task.description }}
+
+FAILED GATES
+{% for r in failed_gates if r.status == 'failed' %}
+- {{ r.gate_id }} (`{{ r.command }}`, exit {{ r.exit_code }})
+{% for issue in r.issues[:30] %}
+  * {{ issue.file | default('') }}{% if issue.line %}:{{ issue.line }}{% endif %} {{ issue.code | default(issue.rule | default('')) }} {{ issue.message | default('') }}
+{% endfor %}
+{% endfor %}

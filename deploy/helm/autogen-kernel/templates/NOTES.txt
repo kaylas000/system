@@ -1,0 +1,9 @@
+AutoGen kernel {{ .Chart.AppVersion }} deployed as {{ include "autogen-kernel.fullname" . }}.
+
+  kubectl port-forward svc/{{ include "autogen-kernel.fullname" . }} 8000:{{ .Values.service.port }}
+  open http://localhost:8000/docs   (API)   /metrics (Prometheus)
+
+Secret "{{ include "autogen-kernel.secretName" . }}" must contain AUTOGEN_DATABASE__POSTGRES_DSN and AUTOGEN_LLM__API_KEY.
+{{- if gt (int .Values.replicaCount) 1 }}
+WARNING: replicaCount > 1 — runs and WebSocket events are per-pod (see values.yaml).
+{{- end }}

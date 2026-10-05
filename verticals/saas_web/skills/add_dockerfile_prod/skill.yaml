@@ -1,0 +1,24 @@
+# From specs/addenda v2 §L with fixes A-14 (no docker build in skill validation - it runs in CI) and A-17
+id: add_dockerfile_prod
+name: "Add production Dockerfile + docker-compose"
+version: "2.0.0"
+description: |
+  Multi-stage Dockerfile (deps -> builder -> runner) for Next.js standalone output, non-root user,
+  healthcheck on /api/health, .dockerignore and docker-compose.yml with the app and PostgreSQL 16.
+category: infra
+tags: [docker, deployment, infra]
+depends_on: [init_nextjs_app_router]
+provides: [dockerfile, docker_compose]
+inputs:
+  type: object
+  properties:
+    node_version: {type: string, default: "20", pattern: '^[0-9]+$'}
+    port: {type: integer, default: 3000}
+template_dir: templates
+entrypoint: hooks.py
+validation:
+  - "test -f Dockerfile && test -f .dockerignore && test -f docker-compose.yml"
+  - "grep -q 'output: \"standalone\"' next.config.mjs"
+outputs:
+  image_port: "{{ port }}"
+compatible_verticals: ["saas_web"]

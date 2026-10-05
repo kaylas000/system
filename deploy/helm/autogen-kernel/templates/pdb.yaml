@@ -1,0 +1,13 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "autogen-kernel.fullname" . }}
+  labels:
+    {{- include "autogen-kernel.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "autogen-kernel.selectorLabels" . | nindent 6 }}
+{{- end }}

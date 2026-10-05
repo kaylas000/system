@@ -1,0 +1,60 @@
+# specs/06_ops/deployment/DOCKERFILE.kernel
+# Multi-stage Build for Kernel Production Image
+
+# --- Stage 1: Base & Dependencies ---
+FROM python:3.11-slim-bookworm AS base
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    POETRY_VERSION=1.8.3 \
+    UV_VERSION=0.3.0
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl git build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (fast Python package manager)
+RUN pip install uv==${UV_VERSION}
+
+WORKDIR /app
+
+# --- Stage 2: Install Dependencies ---
+FROM base AS deps
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --compile-bytecode
+
+# --- Stage 3: Development / Test Image ---
+FROM deps AS dev
+COPY . .
+RUN uv sync --frozen --all-extras --compile-bytecode
+# Install Playwright/Chrome for E2E if needed in CI
+# RUN uv run playwright install --with-deps chromium
+
+# --- Stage 4: Production Runtime ---
+FROM base AS runtime
+ENV ENVIRONMENT=production
+ENV PORT=8000
+
+# Create non-root user
+RUN groupadd -r autogen && useradd -r -g autogen -d /app -s /sbin/nologin autogen
+
+# Copy only necessary files from deps
+COPY --from=deps --chown=autogen:autogen /app/.venv /app/.venv
+COPY --from=deps --chown=autogen:autogen /app/kernel /app/kernel
+COPY --from=deps --chown=autogen:autogen /app/specs /app/specs
+COPY --from=deps --chown=autogen:autogen /app/verticals /app/verticals
+
+# Ensure virtual env is in PATH
+ENV PATH="/app/.venv/bin:$PATH"
+
+USER autogen
+
+EXPOSE 8000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Entry point
+CMD ["python", "-m", "kernel.main", "serve"]

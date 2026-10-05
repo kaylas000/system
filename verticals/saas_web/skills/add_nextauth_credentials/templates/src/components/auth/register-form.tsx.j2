@@ -1,0 +1,51 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
+import { useState } from "react";
+
+import { api } from "@/trpc/react";
+
+export function RegisterForm() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const register = api.auth.register.useMutation();
+
+  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") ?? "");
+    const password = String(form.get("password") ?? "");
+    try {
+      await register.mutateAsync({ name: String(form.get("name") ?? ""), email, password });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Registration failed");
+      return;
+    }
+    await signIn("credentials", { email, password, redirect: false });
+    router.push("/dashboard");
+    router.refresh();
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex w-full max-w-sm flex-col gap-4">
+      <h1 className="text-2xl font-semibold">Create account</h1>
+      <input name="name" required placeholder="Name" autoComplete="name"
+        className="rounded-md border border-input bg-background px-3 py-2" />
+      <input name="email" type="email" required placeholder="E-mail" autoComplete="email"
+        className="rounded-md border border-input bg-background px-3 py-2" />
+      <input name="password" type="password" required minLength={8} placeholder="Password (min. 8 characters)"
+        autoComplete="new-password" className="rounded-md border border-input bg-background px-3 py-2" />
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      <button type="submit" disabled={register.isPending}
+        className="rounded-md bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50">
+        {register.isPending ? "Creating..." : "Create account"}
+      </button>
+      <p className="text-sm text-muted-foreground">
+        Already registered? <Link href="/login" className="underline">Sign in</Link>
+      </p>
+    </form>
+  );
+}
